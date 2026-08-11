@@ -131,8 +131,13 @@ best-effort: if it fails, the desktop builds still publish (see
 | Preview | `v0.1.0-preview.1` | Release candidate |
 | Stable | `v0.1.0` | No `-channel` suffix |
 
-Dev/Alpha/Beta/Preview are all marked as GitHub "pre-releases"; only a plain
-`vX.Y.Z` tag is marked as the latest stable release.
+The channel is shown in the release title (e.g. "Alpha v0.2.0-alpha.4"), but
+none of them are marked as a GitHub "pre-release" — GitHub's platform rule is
+that a prerelease can *never* become the repo's "Latest" release, no matter
+what, so marking them that way meant the newest build was permanently
+excluded from the "Latest" badge and the repo page fell back to a bare
+"N tags" widget. Whichever release is newest becomes "Latest" regardless of
+channel.
 
 ## Status
 

@@ -211,14 +211,16 @@ jobs:
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: "${{ needs.prepare.outputs.label }} ${{ needs.prepare.outputs.tag }}"
-          prerelease: ${{ needs.prepare.outputs.prerelease }}
-          # GitHub only auto-promotes a release to "Latest" if it's NOT a
-          # prerelease -- with every release so far being alpha/dev/etc,
-          # none ever became "Latest", so the repo sidebar fell back to a
-          # bare tag-count widget instead of a release card. "Latest" and
-          # "Pre-release" are independent flags: forcing this true means the
-          # newest release of ANY channel shows as Latest, with a Pre-release
-          # pill next to it when it's not a stable build.
+          # Deliberately NOT using needs.prepare.outputs.prerelease here.
+          # Per GitHub's own API docs: "Drafts and prereleases cannot be set
+          # as latest" -- make_latest is silently ignored for any release
+          # marked prerelease, no matter what. That's why every earlier
+          # alpha/dev release here still left the repo showing a bare
+          # tag-count widget instead of a release card: none of them were
+          # EVER eligible to become "Latest". The channel is still visible
+          # in the release name/title (Dev/Alpha/Beta/Preview/Stable); this
+          # just stops GitHub from hiding it from "Latest" consideration.
+          prerelease: false
           make_latest: "true"
           generate_release_notes: true
           fail_on_unmatched_files: false
