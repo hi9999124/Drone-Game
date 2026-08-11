@@ -175,6 +175,14 @@ jobs:
           tag_name: ${{ steps.channel.outputs.tag }}
           name: "${{ steps.channel.outputs.label }} ${{ steps.channel.outputs.tag }}"
           prerelease: ${{ steps.channel.outputs.prerelease }}
+          # GitHub only auto-promotes a release to "Latest" if it's NOT a
+          # prerelease -- with every release so far being alpha/dev/etc,
+          # none ever became "Latest", so the repo sidebar fell back to a
+          # bare tag-count widget instead of a release card. "Latest" and
+          # "Pre-release" are independent flags: forcing this true means the
+          # newest release of ANY channel shows as Latest, with a Pre-release
+          # pill next to it when it's not a stable build.
+          make_latest: "true"
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: |
