@@ -1,14 +1,36 @@
 name: Release
 
-# Triggered by pushing a tag like v0.1.0-alpha.1, v0.1.0-beta.2, v0.1.0-dev.5,
-# v0.1.0-preview.1, or v0.1.0 (stable). Builds a standalone executable per OS
-# with PyInstaller (players don't need Python installed) and publishes them
-# as assets on a GitHub Release, marked as a pre-release unless the tag has
-# no "-channel" suffix.
+# Triggered either by pushing a tag like v0.1.0-alpha.1, v0.1.0-beta.2,
+# v0.1.0-dev.5, v0.1.0-preview.1, v0.1.0 (stable) -- or manually via
+# "Run workflow" in the Actions tab, which builds the tag name from the
+# version/channel/build inputs instead. Builds a standalone executable per
+# OS with PyInstaller (players don't need Python installed) and publishes
+# them as assets on a GitHub Release, marked as a pre-release unless the
+# channel is "stable".
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number, e.g. 0.1.0"
+        required: true
+      channel:
+        description: "Release channel"
+        required: true
+        default: "alpha"
+        type: choice
+        options:
+          - dev
+          - alpha
+          - beta
+          - preview
+          - stable
+      build_number:
+        description: "Build number within the channel, e.g. 1"
+        required: true
+        default: "1"
 
 permissions:
   contents: write
@@ -66,10 +88,23 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Determine release channel from tag
+      - name: Determine release tag and channel
         id: channel
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            CHANNEL="${{ github.event.inputs.channel }}"
+            BUILD="${{ github.event.inputs.build_number }}"
+            if [[ "$CHANNEL" == "stable" ]]; then
+              TAG="v${VERSION}"
+            else
+              TAG="v${VERSION}-${CHANNEL}.${BUILD}"
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
           if [[ "$TAG" == *-dev* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Dev" >> "$GITHUB_OUTPUT"
           elif [[ "$TAG" == *-alpha* ]]; then
@@ -85,7 +120,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "${{ steps.channel.outputs.label }} ${{ github.ref_name }}"
+          tag_name: ${{ steps.channel.outputs.tag }}
+          name: "${{ steps.channel.outputs.label }} ${{ steps.channel.outputs.tag }}"
           prerelease: ${{ steps.channel.outputs.prerelease }}
           generate_release_notes: true
           files: artifacts/*.zip
