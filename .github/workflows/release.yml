@@ -88,15 +88,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build APK with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
+      - uses: actions/setup-python@v5
         with:
-          command: buildozer android debug
-          buildozer_version: stable
+          python-version: "3.11"
 
-      - name: Rename APK
-        run: cp "${{ steps.buildozer.outputs.filename }}" DronePVO-android.apk
+      # Buildozer needs a JDK. Installing it via setup-java avoids the
+      # unmaintained third-party action that pulled in ppa:openjdk-r, whose
+      # Release file 404s on current Ubuntu and broke the whole Docker build.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The Android SDK/NDK is a multi-GB download; caching it turns a ~30
+      # minute first build into a few minutes on later runs.
+      - name: Cache Android SDK/NDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-${{ runner.os }}-
+
+      - name: Install Buildozer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git zip unzip autoconf libtool pkg-config \
+            zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev
+          python -m pip install --upgrade pip
+          pip install buildozer "cython<3"
+
+      - name: Build APK
+        run: yes | buildozer -v android debug
+
+      - name: Collect APK
+        run: cp bin/*.apk DronePVO-android.apk
 
       - uses: actions/upload-artifact@v4
         with:
