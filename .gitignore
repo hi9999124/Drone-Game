@@ -9,7 +9,12 @@ env/
 *.egg-info/
 build/
 dist/
-*.spec
+# PyInstaller-generated spec file (not buildozer.spec, which is committed)
+/main.spec
+/DronePVO.spec
+
+.buildozer/
+bin/
 
 .DS_Store
 Thumbs.db

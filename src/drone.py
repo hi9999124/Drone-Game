@@ -22,17 +22,15 @@ class Drone:
         self.angle = -90.0  # degrees; -90 faces "up" in screen coordinates
         self.throttle = 0.0  # 0..1, for the HUD throttle bar and engine glow
 
-    def handle_input(self, keys, dt):
-        rotate_input = 0
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            rotate_input -= 1
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            rotate_input += 1
+    # Takes plain booleans rather than reading pygame.key itself, so the same
+    # physics respond identically to a keyboard, on-screen touch buttons, or
+    # (later) an AI controller -- none of which need to know about each other.
+    def handle_input(self, thrust, rotate_left, rotate_right, dt):
+        rotate_input = (1 if rotate_right else 0) - (1 if rotate_left else 0)
         self.angle += rotate_input * self.ROTATE_SPEED * dt
 
-        thrusting = keys[pygame.K_UP] or keys[pygame.K_w]
-        self.throttle = 1.0 if thrusting else 0.0
-        if thrusting:
+        self.throttle = 1.0 if thrust else 0.0
+        if thrust:
             forward = pygame.Vector2(1, 0).rotate(self.angle)
             self.vel += forward * self.THRUST_ACCEL * dt
 
