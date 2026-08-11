@@ -132,6 +132,13 @@ jobs:
     # showing up as "Latest" -- see the two-stage release/attach-android
     # split below.
     continue-on-error: true
+    outputs:
+      # NOT the same as this job's own pass/fail: continue-on-error means
+      # needs.build-android.result reads as "success" downstream even when
+      # the job actually failed, so attach-android can't gate on that. This
+      # output is set for real only if "Collect APK" (i.e. the actual build)
+      # succeeded, and is what attach-android checks instead.
+      apk_built: ${{ steps.apk_status.outputs.built }}
     steps:
       - uses: actions/checkout@v4
 
@@ -172,6 +179,14 @@ jobs:
 
       - name: Collect APK
         run: cp bin/*.apk DronePVO-android.apk
+
+      # Only reached if every previous step (including Collect APK) actually
+      # succeeded -- see the outputs: comment above for why this can't be
+      # `needs.build-android.result` in the downstream job instead.
+      - name: Mark APK built
+        id: apk_status
+        if: success()
+        run: echo "built=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -214,9 +229,18 @@ jobs:
   # release that "release" already published. Re-running action-gh-release
   # against the same tag adds files to the existing release rather than
   # creating a second one.
+  #
+  # Gates on build-android's own `apk_built` output, NOT
+  # needs.build-android.result: because build-android has
+  # continue-on-error: true, GitHub Actions reports its `result` to
+  # downstream jobs as "success" even when it actually failed (that's the
+  # whole point of continue-on-error -- it's meant to not block dependents).
+  # Using `result` here previously caused this job to run and fail even
+  # though build-android had failed, trying to download an artifact that
+  # was never uploaded.
   attach-android:
     needs: [prepare, build-android, release]
-    if: needs.build-android.result == 'success'
+    if: needs.build-android.outputs.apk_built == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
