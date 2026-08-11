@@ -80,7 +80,14 @@ jobs:
           path: ${{ matrix.asset_name }}
 
   build-android:
-    runs-on: ubuntu-latest
+    # Pinned to 22.04, not ubuntu-latest (now 24.04): python-for-android's
+    # libffi recipe ships a vendored configure.ac that calls the libtool
+    # macro LT_SYS_SYMBOL_USCORE, which fails to resolve against the newer
+    # autotools/libtool on 24.04 ("possibly undefined macro"). 22.04 ships
+    # versions the recipe was actually written against. This is a known
+    # p4a/Buildozer-on-24.04 incompatibility, not something buildozer.spec
+    # can work around.
+    runs-on: ubuntu-22.04
     # Buildozer/python-for-android is a much less battle-tested pipeline than
     # PyInstaller; if it breaks, that shouldn't block publishing the desktop
     # builds that did succeed.
