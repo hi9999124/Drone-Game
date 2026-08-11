@@ -36,6 +36,44 @@ permissions:
   contents: write
 
 jobs:
+  # Computed once and shared via outputs so the fast release job and the
+  # slow Android attach job agree on the same tag without duplicating logic.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.channel.outputs.tag }}
+      label: ${{ steps.channel.outputs.label }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+    steps:
+      - name: Determine release tag and channel
+        id: channel
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            CHANNEL="${{ github.event.inputs.channel }}"
+            BUILD="${{ github.event.inputs.build_number }}"
+            if [[ "$CHANNEL" == "stable" ]]; then
+              TAG="v${VERSION}"
+            else
+              TAG="v${VERSION}-${CHANNEL}.${BUILD}"
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if [[ "$TAG" == *-dev* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Dev" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *-alpha* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Alpha" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *-beta* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Beta" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *-preview* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Preview" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"; echo "label=Stable" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     strategy:
       fail-fast: false
@@ -89,8 +127,10 @@ jobs:
     # can work around.
     runs-on: ubuntu-22.04
     # Buildozer/python-for-android is a much less battle-tested pipeline than
-    # PyInstaller; if it breaks, that shouldn't block publishing the desktop
-    # builds that did succeed.
+    # PyInstaller, and a cold SDK/NDK download can take 20-40 minutes. It
+    # must not hold up publishing the desktop builds or the release itself
+    # showing up as "Latest" -- see the two-stage release/attach-android
+    # split below.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -138,50 +178,25 @@ jobs:
           name: DronePVO-android.apk
           path: DronePVO-android.apk
 
+  # Publishes as soon as the (fast, reliable) desktop builds are ready, so
+  # the release shows up as "Latest" within a couple of minutes instead of
+  # waiting on the (slow, less reliable) Android build below.
   release:
-    needs: [build, build-android]
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: DronePVO-*.zip
           merge-multiple: true
-
-      - name: Determine release tag and channel
-        id: channel
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ github.event.inputs.version }}"
-            CHANNEL="${{ github.event.inputs.channel }}"
-            BUILD="${{ github.event.inputs.build_number }}"
-            if [[ "$CHANNEL" == "stable" ]]; then
-              TAG="v${VERSION}"
-            else
-              TAG="v${VERSION}-${CHANNEL}.${BUILD}"
-            fi
-          else
-            TAG="${GITHUB_REF_NAME}"
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-          if [[ "$TAG" == *-dev* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Dev" >> "$GITHUB_OUTPUT"
-          elif [[ "$TAG" == *-alpha* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Alpha" >> "$GITHUB_OUTPUT"
-          elif [[ "$TAG" == *-beta* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Beta" >> "$GITHUB_OUTPUT"
-          elif [[ "$TAG" == *-preview* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "label=Preview" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"; echo "label=Stable" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.channel.outputs.tag }}
-          name: "${{ steps.channel.outputs.label }} ${{ steps.channel.outputs.tag }}"
-          prerelease: ${{ steps.channel.outputs.prerelease }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: "${{ needs.prepare.outputs.label }} ${{ needs.prepare.outputs.tag }}"
+          prerelease: ${{ needs.prepare.outputs.prerelease }}
           # GitHub only auto-promotes a release to "Latest" if it's NOT a
           # prerelease -- with every release so far being alpha/dev/etc,
           # none ever became "Latest", so the repo sidebar fell back to a
@@ -192,6 +207,26 @@ jobs:
           make_latest: "true"
           generate_release_notes: true
           fail_on_unmatched_files: false
-          files: |
-            artifacts/*.zip
-            artifacts/*.apk
+          files: artifacts/*.zip
+
+  # Runs after build-android finishes (success OR failure, since it's
+  # continue-on-error) and, only on success, uploads the APK onto the
+  # release that "release" already published. Re-running action-gh-release
+  # against the same tag adds files to the existing release rather than
+  # creating a second one.
+  attach-android:
+    needs: [prepare, build-android, release]
+    if: needs.build-android.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DronePVO-android.apk
+          path: artifacts
+
+      - name: Attach APK to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          fail_on_unmatched_files: false
+          files: artifacts/*.apk
