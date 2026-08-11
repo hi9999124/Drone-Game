@@ -34,33 +34,82 @@ python main.py
 | Key | Action |
 |---|---|
 | `W` / `Up Arrow` | Thrust forward |
-| `A` / `Left Arrow` | Rotate left |
-| `D` / `Right Arrow` | Rotate right |
-| `Esc` | Pause / resume |
+| `S` / `Down Arrow` | Reverse thrust / brake |
+| `A` / `Left Arrow` | Turn left |
+| `D` / `Right Arrow` | Turn right |
+| `Space` / `E` | Climb |
+| `Shift` / `Q` | Descend |
+| `F` / left click | Use airframe ability (bomb, rocket, boost) |
+| `Esc` | Pause |
 
-Flight is arcade-style: thrust always pushes in the direction you're currently
-facing (like *Asteroids*), and the arena wraps at the edges.
+Flight is arcade-style: thrust pushes in the direction you're facing (like
+*Asteroids*), with a separate altitude axis on top.
 
-On Android (or any touchscreen), three on-screen buttons in the bottom corners
-do the same job: `<` `>` to rotate, `^` to thrust. They're mouse-clickable on
-desktop too, and support holding two at once (e.g. thrust + turn).
+On a touchscreen the same controls appear as on-screen pads — turn/thrust on
+the left, altitude and FIRE on the right. They're mouse-clickable on desktop
+too, and multi-touch aware, so you can hold thrust, turn and climb at once.
+
+## The 2.5D world
+
+The city is a flat top-down plane plus a real altitude axis. Altitude only ever
+shifts a sprite *up the screen*, and every flying object drops a shadow on the
+ground below it — that pairing is what reads as height. Buildings are drawn as
+an extruded roof and front wall, and they physically block you: fly over a
+120 m block or route around it, because clipping one at speed wrecks the
+airframe.
+
+## Airframes
+
+| Airframe | Style | Ability | Unlocks at |
+|---|---|---|---|
+| FPV Kamikaze | Fast, fragile, 5 expendable airframes | Boost — ram the target | 0 |
+| Baba Yaga | Heavy, tanky, slow | Drop Bomb — gravity-fed, needs altitude and lead | 500 |
+| Shahed-256 | Very fast, barely steers | Terminal Dive — huge blast | 1500 |
+| Hornet FPV | Reusable rocket platform | Fire Rocket — flat and fast | 3000 |
+
+Unlocks are driven by *career* score, which accumulates across runs and is
+saved automatically.
+
+## Mission
+
+Destroy every marked target block (red, with a crosshair on the roof) while
+enemy FPV interceptors hunt you. Off-screen targets are marked by arrows at the
+edge of the screen. Difficulty (Easy → Insane) changes interceptor count,
+speed, reaction time, and whether they shoot back — same AI throughout, just
+sharper numbers.
+
+## Saving
+
+Progress and settings save automatically to `~/.dronepvo/savegame.json` (the
+app's private directory on Android) after every mission and settings change.
+Writes go through a temp file and atomic replace, so a crash mid-save can't
+corrupt the profile.
 
 ## Project structure
 
 ```
-main.py              Entry point
-requirements.txt     Just pygame
+main.py               Entry point
+requirements.txt      Just pygame
 src/
-  game.py             Menu / Playing / Paused state machine and main loop
-  drone.py            Player-controlled drone: physics, drawing
-  constants.py         Screen size, color palette
-  utils.py             Small color-lerp helper for UI hover animations
+  game.py              State machine (menu / select / settings / play / pause / result)
+  world.py             City generation, collisions, mission rules, depth-sorted draw
+  camera.py            Follow camera, screen shake, world -> screen projection
+  drones.py            Airframe definitions (stats + abilities)
+  save_system.py       Atomic JSON save/load for profile + settings
+  constants.py         Screen size, projection scale, palette
+  utils.py             lerp / clamp helpers
+  entities/
+    base.py             Shared flight integration + ground-shadow drawing
+    player.py           Player drone, ability handling
+    enemy.py            Interceptor AI + difficulty profiles
+    building.py         Apartment blocks: extruded 2.5D draw, damage
+    projectile.py       Bombs, rockets, explosions
   ui/
-    button.py           Hover-animated button widget
-    menu.py              MainMenu and PauseMenu
-    hud.py               In-game speed/throttle readout
-    background.py        Grid background
-    touch_controls.py    On-screen thrust/rotate buttons (touch + mouse)
+    button.py           Hover-animated button + settings option row
+    menu.py             Main / drone select / settings / pause / result screens
+    hud.py              Flight, ability and mission panels, off-screen target arrows
+    touch_controls.py   Responsive on-screen pads (touch + mouse)
+    fonts.py            Cached font loader
 buildozer.spec        Android (APK) packaging config for python-for-android
 ```
 
@@ -87,6 +136,8 @@ Dev/Alpha/Beta/Preview are all marked as GitHub "pre-releases"; only a plain
 
 ## Status
 
-Playable now: fly the drone around the arena from the main menu, pause mid-flight,
-resume or return to the menu. Next up is a PVO turret to actually fight — see
-[`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the plan.
+Playable end to end: pick an airframe, fly a strike mission over a 2.5D city
+against interceptors at four difficulty tiers, win or lose, and keep your
+career progress. **Online multiplayer is not implemented yet** — everything
+today is offline vs. AI. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for what's
+next.

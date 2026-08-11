@@ -3,16 +3,18 @@ import sys
 
 import pygame
 
-from . import constants
-from .drone import Drone
-from .ui.background import draw_grid
+from . import constants, drones, save_system, world as world_module
+from .camera import Camera
 from .ui.hud import HUD
-from .ui.menu import MainMenu, PauseMenu
+from .ui.menu import DroneSelectMenu, MainMenu, PauseMenu, ResultMenu, SettingsMenu
 from .ui.touch_controls import TouchControls
 
 STATE_MENU = "menu"
+STATE_DRONE_SELECT = "drone_select"
+STATE_SETTINGS = "settings"
 STATE_PLAYING = "playing"
 STATE_PAUSED = "paused"
+STATE_RESULT = "result"
 
 # python-for-android sets this env var; it's the standard way to detect
 # "running as a packaged Android app" from within the app itself.
@@ -25,95 +27,263 @@ class Game:
         pygame.display.set_caption("Drone / PVO")
 
         if IS_ANDROID:
-            # Phones vary in resolution, so ask for a fullscreen surface at
-            # native size instead of the fixed desktop window size, then
-            # update the shared constants before anything else (menus, HUD,
-            # touch buttons) lays itself out from them.
+            # Phones vary in resolution, so take a fullscreen surface at native
+            # size and update the shared constants before any UI lays itself out.
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
             constants.WIDTH, constants.HEIGHT = self.screen.get_size()
         else:
             self.screen = pygame.display.set_mode((constants.WIDTH, constants.HEIGHT))
 
         self.clock = pygame.time.Clock()
-
         self.running = True
-        self.state = STATE_MENU
-        self.drone = None
 
-        self.main_menu = MainMenu(self._start_game, self._quit)
-        self.pause_menu = PauseMenu(self._resume, self._return_to_menu, self._quit)
+        self.data = save_system.load()
+        self.profile = self.data["profile"]
+        self.settings = self.data["settings"]
+
+        self.camera = Camera()
         self.hud = HUD()
-        self.touch_controls = TouchControls()
+        self.touch = TouchControls()
+        self.world = None
+        self.state = STATE_MENU
+        self.previous_state = STATE_MENU
+        self._tracked_player = None
 
-    def run(self):
-        while self.running:
-            dt = self.clock.tick(constants.FPS) / 1000.0
-            self._handle_events(dt)
-            self._update(dt)
-            self._draw()
-        pygame.quit()
-        sys.exit()
+        self._build_menus()
 
-    def _start_game(self):
-        self.drone = Drone(constants.WIDTH / 2, constants.HEIGHT / 2)
+    # ------------------------------------------------------------------ setup
+
+    def _build_menus(self):
+        self.main_menu = MainMenu(self.profile, self._open_drone_select, self._open_settings, self._quit)
+        self.pause_menu = PauseMenu(
+            self._resume,
+            self._open_drone_select,
+            self._open_settings,
+            self._return_to_menu,
+            self._quit,
+        )
+        self.settings_menu = SettingsMenu(self.settings, self._close_settings, self._on_settings_changed)
+        self.drone_menu = None
+        self.result_menu = None
+
+    @property
+    def show_touch(self):
+        mode = self.settings.get("touch_controls", "Auto")
+        if mode == "On":
+            return True
+        if mode == "Off":
+            return False
+        return IS_ANDROID
+
+    # ------------------------------------------------------------- state flow
+
+    def _open_drone_select(self):
+        self.drone_menu = DroneSelectMenu(
+            self.profile,
+            self._start_mission,
+            self._close_drone_select,
+            selected_key=self.profile.get("last_drone"),
+        )
+        self.previous_state = self.state
+        self.state = STATE_DRONE_SELECT
+
+    def _close_drone_select(self):
+        # Back out to wherever we came from: the main menu, or a paused mission.
+        self.state = STATE_PAUSED if self.previous_state == STATE_PAUSED else STATE_MENU
+
+    def _open_settings(self):
+        self.previous_state = self.state
+        self.state = STATE_SETTINGS
+
+    def _close_settings(self):
+        self.state = STATE_PAUSED if self.previous_state == STATE_PAUSED else STATE_MENU
+
+    def _on_settings_changed(self):
+        self.camera.enable_shake = self.settings.get("screen_shake", True)
+        self._autosave()
+
+    def _start_mission(self, drone_key):
+        drone_type = drones.get(drone_key)
+        self.profile["last_drone"] = drone_key
+        self._autosave()
+
+        self.world = world_module.World(drone_type, self.settings.get("difficulty", "Normal"))
+        self.camera.enable_shake = self.settings.get("screen_shake", True)
+        self.camera.snap_to(self.world.player.pos)
+        self._tracked_player = self.world.player
+        self.touch.release_all()
         self.state = STATE_PLAYING
 
+    def _retry(self):
+        self._start_mission(self.profile.get("last_drone", "fpv"))
+
     def _resume(self):
+        self.touch.release_all()
         self.state = STATE_PLAYING
 
     def _return_to_menu(self):
-        self.drone = None
+        self.world = None
         self.state = STATE_MENU
 
     def _quit(self):
+        self._autosave()
         self.running = False
+
+    def _autosave(self):
+        save_system.save(self.data)
+
+    # ------------------------------------------------------------- main loop
+
+    def run(self):
+        while self.running:
+            dt = min(self.clock.tick(constants.FPS) / 1000.0, 0.05)
+            self._handle_events(dt)
+            self._update(dt)
+            self._draw()
+        self._autosave()
+        pygame.quit()
+        sys.exit()
+
+    def _active_menu(self):
+        if self.state == STATE_MENU:
+            return self.main_menu
+        if self.state == STATE_DRONE_SELECT:
+            return self.drone_menu
+        if self.state == STATE_SETTINGS:
+            return self.settings_menu
+        if self.state == STATE_PAUSED:
+            return self.pause_menu
+        if self.state == STATE_RESULT:
+            return self.result_menu
+        return None
 
     def _handle_events(self, dt):
         mouse_pos = pygame.mouse.get_pos()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                self.running = False
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                if self.state == STATE_PLAYING:
-                    self.state = STATE_PAUSED
-                elif self.state == STATE_PAUSED:
-                    self.state = STATE_PLAYING
+                self._quit()
+                return
 
-            if self.state == STATE_MENU:
-                self.main_menu.handle_event(event, mouse_pos)
-            elif self.state == STATE_PLAYING:
-                self.touch_controls.handle_event(event)
-            elif self.state == STATE_PAUSED:
-                self.pause_menu.handle_event(event, mouse_pos)
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                self._handle_escape()
+                continue
+
+            if self.state == STATE_PLAYING:
+                if self.show_touch:
+                    self.touch.handle_event(event)
+                continue
+
+            menu = self._active_menu()
+            if menu is not None:
+                menu.handle_event(event, mouse_pos)
+
+    def _handle_escape(self):
+        if self.state == STATE_PLAYING:
+            self.touch.release_all()
+            self.state = STATE_PAUSED
+        elif self.state == STATE_PAUSED:
+            self._resume()
+        elif self.state in (STATE_SETTINGS,):
+            self._close_settings()
+        elif self.state == STATE_DRONE_SELECT:
+            self._close_drone_select()
+
+    def _gather_controls(self):
+        keys = pygame.key.get_pressed()
+        touch = self.touch.state if self.show_touch else {}
+        return {
+            "thrust": keys[pygame.K_w] or keys[pygame.K_UP] or touch.get("thrust", False),
+            # S / Down arrow: reverse thrust and brake. This is the axis that
+            # was missing entirely before.
+            "reverse": keys[pygame.K_s] or keys[pygame.K_DOWN] or touch.get("reverse", False),
+            "left": keys[pygame.K_a] or keys[pygame.K_LEFT] or touch.get("left", False),
+            "right": keys[pygame.K_d] or keys[pygame.K_RIGHT] or touch.get("right", False),
+            "ascend": keys[pygame.K_SPACE] or keys[pygame.K_e] or touch.get("ascend", False),
+            "descend": (
+                keys[pygame.K_LSHIFT]
+                or keys[pygame.K_RSHIFT]
+                or keys[pygame.K_q]
+                or touch.get("descend", False)
+            ),
+            "fire": (
+                keys[pygame.K_f]
+                or pygame.mouse.get_pressed()[0]
+                or touch.get("fire", False)
+            ),
+        }
 
     def _update(self, dt):
         mouse_pos = pygame.mouse.get_pos()
-        if self.state == STATE_MENU:
-            self.main_menu.update(mouse_pos, dt)
-        elif self.state == STATE_PLAYING:
-            keys = pygame.key.get_pressed()
-            thrust = keys[pygame.K_UP] or keys[pygame.K_w] or self.touch_controls.thrust
-            rotate_left = keys[pygame.K_LEFT] or keys[pygame.K_a] or self.touch_controls.left
-            rotate_right = keys[pygame.K_RIGHT] or keys[pygame.K_d] or self.touch_controls.right
-            self.drone.handle_input(thrust, rotate_left, rotate_right, dt)
-            self.drone.update(dt, (constants.WIDTH, constants.HEIGHT))
-        elif self.state == STATE_PAUSED:
-            self.pause_menu.update(mouse_pos, dt)
+
+        if self.state == STATE_PLAYING and self.world is not None:
+            self.world.update(dt, self._gather_controls())
+            if self.world.shake_request > 0.0:
+                self.camera.add_shake(self.world.shake_request)
+            player = self.world.player
+            if player is not None and player.alive:
+                # A respawn puts the next airframe at the map edge. Snapping
+                # avoids a long disorienting pan across the whole city.
+                if player is not self._tracked_player:
+                    self.camera.snap_to(player.pos)
+                    self._tracked_player = player
+                self.camera.follow(player.pos, dt)
+            self.camera.update(dt)
+
+            if self.world.result != world_module.RESULT_PLAYING:
+                self._finish_mission()
+            return
+
+        menu = self._active_menu()
+        if menu is not None:
+            menu.update(mouse_pos, dt)
+
+    def _finish_mission(self):
+        world = self.world
+        won = world.result == world_module.RESULT_WON
+
+        self.profile["total_score"] += world.score
+        self.profile["best_score"] = max(self.profile["best_score"], world.score)
+        self.profile["targets_destroyed"] += world.targets_destroyed
+        self.profile["enemies_destroyed"] += world.enemies_destroyed
+        if won:
+            self.profile["missions_completed"] += 1
+        self._autosave()
+
+        summary = [
+            ("SCORE", world.score),
+            ("TARGETS DESTROYED", f"{world.targets_destroyed}/{len(world.targets)}"),
+            ("HOSTILES DOWNED", world.enemies_destroyed),
+            ("AIRFRAMES LEFT", world.units_left),
+            ("CAREER TOTAL", self.profile["total_score"]),
+        ]
+        self.result_menu = ResultMenu(won, summary, self._retry, self._open_drone_select, self._return_to_menu)
+        self.state = STATE_RESULT
 
     def _draw(self):
-        self.screen.fill(constants.BG_COLOR)
-        draw_grid(self.screen)
+        if self.state in (STATE_PLAYING, STATE_PAUSED, STATE_RESULT) and self.world is not None:
+            self.world.draw(self.screen, self.camera)
+            self.hud.draw(
+                self.screen,
+                self.world,
+                self.camera,
+                show_fps=self.settings.get("show_fps", False),
+                fps=self.clock.get_fps(),
+            )
+            if self.state == STATE_PLAYING and self.show_touch:
+                self.touch.draw(self.screen)
+        else:
+            self.screen.fill(constants.BG_COLOR)
+            self._draw_menu_backdrop()
 
-        if self.state == STATE_MENU:
-            self.main_menu.draw(self.screen)
-        elif self.state == STATE_PLAYING:
-            self.drone.draw(self.screen)
-            self.hud.draw(self.screen, self.drone)
-            self.touch_controls.draw(self.screen)
-        elif self.state == STATE_PAUSED:
-            self.drone.draw(self.screen)
-            self.hud.draw(self.screen, self.drone)
-            self.touch_controls.draw(self.screen)
-            self.pause_menu.draw(self.screen)
+        menu = self._active_menu()
+        if menu is not None and self.state != STATE_PLAYING:
+            menu.draw(self.screen)
 
         pygame.display.flip()
+
+    def _draw_menu_backdrop(self):
+        spacing = 48
+        for x in range(0, constants.WIDTH, spacing):
+            pygame.draw.line(self.screen, constants.GRID_COLOR, (x, 0), (x, constants.HEIGHT))
+        for y in range(0, constants.HEIGHT, spacing):
+            pygame.draw.line(self.screen, constants.GRID_COLOR, (0, y), (constants.WIDTH, y))

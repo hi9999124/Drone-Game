@@ -21,25 +21,66 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
 - [x] **Release pipeline**: GitHub Actions builds Windows/macOS/Linux executables
       (PyInstaller) on every tag/dispatch, publishes to GitHub Releases under
       dev/alpha/beta/preview/stable channels
-- [x] **Touch controls + Android APK**: on-screen thrust/rotate buttons
+- [x] **Touch controls + Android APK**: responsive on-screen pads
       (`src/ui/touch_controls.py`, multi-touch aware) and a Buildozer-based
       Android build in the same release pipeline
+- [x] **2.5D world**: altitude axis with ground shadows and extruded buildings
+      (`src/camera.py` projection, `src/entities/building.py`)
+- [x] **Airframe selection** with four drones, distinct stats and abilities,
+      score-gated unlocks (`src/drones.py`, `DroneSelectMenu`)
+- [x] **Save / autosave / settings**: atomic JSON profile + settings
+      (`src/save_system.py`), settings menu with working difficulty, FPS,
+      screen-shake and touch-control options
+- [x] **Structures + enemies**: procedural abandoned apartment blocks, mission
+      targets, enemy FPV interceptors with a patrol/chase/attack state machine
+      and four difficulty tiers
+- [x] **Full mission loop**: win/lose conditions, scoring, result screen,
+      career progression
 - [ ] iOS — see "Mobile & iOS" below; blocked on a decision, not on code
-- [ ] PVO / turret entity — detection, aim, and a shared hit-detection system
-- [ ] Win/lose condition, scoring
-- [ ] Simple AI difficulty tiers (optional, once a turret exists to fight)
+- [ ] **Online multiplayer** — not started. Everything today is offline vs. AI;
+      see "Multiplayer" below for what this actually costs
+- [ ] Ground-based PVO/SAM turrets as a third entity type (the original
+      "play the air-defence side" idea)
+- [ ] Audio (engine loop, explosions) — no sound at all right now
 
 ## Architecture
 
 - `main.py` — entry point, creates and runs `Game`
-- `src/game.py` — top-level state machine (`menu` / `playing` / `paused`) and the
-  main loop (fixed-timestep-independent via delta time, so speed doesn't change
-  with frame rate)
-- `src/drone.py` — the player-controlled drone: position/velocity as `pygame.Vector2`,
-  rotation, drag, speed cap
-- `src/ui/` — `Button` (hover-animated), `MainMenu`, `PauseMenu`, `HUD`, background grid
-- `src/constants.py` — screen size, color palette
-- `src/utils.py` — small color-lerp helper used for hover animations
+- `src/game.py` — state machine (`menu` / `drone_select` / `settings` /
+  `playing` / `paused` / `result`) and the main loop, delta-time driven so
+  behaviour doesn't change with frame rate
+- `src/world.py` — owns the city, everything flying in it, collision resolution
+  and the win/lose rules
+- `src/camera.py` — follow camera, screen shake, and the world→screen
+  projection that creates the 2.5D look
+- `src/entities/` — `base.Aircraft` (shared flight integration + shadows),
+  `player`, `enemy`, `building`, `projectile`
+- `src/drones.py` — airframe stat/ability table, the single place to tune or
+  add a drone
+- `src/save_system.py` — profile + settings persistence
+- `src/ui/` — menus, HUD, touch pads, cached fonts
+
+### How the 2.5D projection works
+
+The world is a flat XY plane with an altitude (Z) axis bolted on. The entire
+trick lives in `Camera.to_screen()`:
+
+```
+screen_x = world_x - cam_x + WIDTH/2
+screen_y = world_y - cam_y + HEIGHT/2 - altitude * Z_SCALE
+```
+
+Altitude only shifts things up the screen; it never changes X. Two consequences
+make it read as 3D without any 3D maths:
+
+1. Every flyer draws a **ground shadow** at its own XY with altitude 0. The gap
+   between sprite and shadow *is* the perceived height.
+2. Vertical side walls project to zero screen width, so a building only ever
+   needs its **roof quad and front wall** drawn — which is why the buildings
+   are cheap despite looking solid.
+
+Everything is then **depth-sorted by world Y** (painter's algorithm) so nearer
+objects overlap farther ones.
 
 ## Design principles
 
@@ -90,9 +131,37 @@ player experience (install a sideloading tool, sign with their own Apple ID,
 periodic re-signing) is a real step down from "download and tap an APK" —
 worth deciding on deliberately rather than defaulting into.
 
-## Next step: Phase 2 — PVO / turret
+## Multiplayer (not started)
 
-- A turret entity that rotates toward the drone within a detection radius
-- Shared "fire" and "hit" logic usable by both the drone and the turret, so
-  drone-vs-turret combat doesn't duplicate collision code
-- A loss condition (drone hit) and a way to see it in the interface (game-over screen)
+Offline vs. AI is done, including difficulty tiers. Online is the one item from
+the request that is **not** built, and it's worth being clear about why before
+starting it: it isn't a feature so much as a change to how the whole game is
+structured. Roughly what it involves:
+
+- **Authority.** Right now `World` mutates state directly and trusts itself.
+  Networked play needs one authoritative simulation (host or dedicated server)
+  with clients sending *inputs* rather than positions, or every player can
+  simply declare they won.
+- **Serialization + tick sync.** Entity state has to become something
+  serialisable and reconcilable, with interpolation for remote entities, or
+  everything jitters.
+- **Transport.** Python has no batteries-included game netcode. LAN is
+  tractable with raw UDP sockets; internet play needs either port forwarding
+  (bad UX) or a relay server (a hosting cost, which the $0 constraint rules
+  out — unless a free tier like Cloudflare Workers can be made to fit, which
+  is worth investigating before committing).
+
+A sensible order: **LAN two-player first** (no relay, no accounts, proves the
+authority model), and only then look at internet play. Trying to do rooms,
+accounts and matchmaking before the simulation is authoritative would mean
+rewriting all of it.
+
+## Other next steps
+
+- **Ground PVO/SAM turrets** — the original "play the air-defence side" idea.
+  The `Aircraft` base and the shared detonate/damage path in `World` already
+  give this most of what it needs.
+- **Audio** — engine loop, explosions, target-destroyed sting. Free CC0 sources
+  are listed in the tech-stack notes; nothing here costs money.
+- **More airframes** — `src/drones.py` is a plain table; adding one is a single
+  `DroneType(...)` entry plus an unlock threshold.
