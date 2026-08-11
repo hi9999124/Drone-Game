@@ -4,9 +4,16 @@ A simple 2D drone-flight game built with **Python + Pygame** — a real menu, a
 pause screen, and an in-game HUD, no Unity or other engine required. See
 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the design plan and what's next.
 
-## Run it
+## Play it
 
-Requires Python 3.9+.
+**No Python needed:** download a build from the [Releases page](../../releases) —
+pick a Windows, macOS, or Linux `.zip`, extract it, and run `DronePVO` (or
+`DronePVO.exe` on Windows). Windows/macOS may warn that the app is from an
+unidentified developer since it isn't code-signed (that costs money — see
+`PROJECT_PLAN.md`'s $0-budget constraint); click through "Run anyway" /
+"Open anyway" to launch it.
+
+**From source** (requires Python 3.9+):
 
 ```
 pip install -r requirements.txt
@@ -41,6 +48,24 @@ src/
     hud.py               In-game speed/throttle readout
     background.py        Grid background
 ```
+
+## Release channels
+
+Releases are cut by pushing a tag matching `v<version>[-<channel>.<n>]`; a
+GitHub Actions workflow (`.github/workflows/release.yml`) then builds a
+PyInstaller executable for Windows/macOS/Linux and publishes them to the
+[Releases page](../../releases) automatically.
+
+| Channel | Tag example | Meaning |
+|---|---|---|
+| Dev | `v0.1.0-dev.1` | Frequent, possibly-broken snapshots |
+| Alpha | `v0.1.0-alpha.1` | Early, functional but incomplete |
+| Beta | `v0.1.0-beta.1` | Feature-complete, still being tuned |
+| Preview | `v0.1.0-preview.1` | Release candidate |
+| Stable | `v0.1.0` | No `-channel` suffix |
+
+Dev/Alpha/Beta/Preview are all marked as GitHub "pre-releases"; only a plain
+`vX.Y.Z` tag is marked as the latest stable release.
 
 ## Status
 
