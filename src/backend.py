@@ -109,7 +109,17 @@ def is_configured():
 
 
 def _request(url, payload=None, method="GET", token=None, timeout=REQUEST_TIMEOUT):
-    headers = {"Accept": "application/json"}
+    # Without an explicit User-Agent, urllib sends "Python-urllib/3.x" --
+    # a well-known non-browser signature that Cloudflare's platform-level
+    # bot protection on shared *.workers.dev domains blocks by default
+    # (browsers pass, scripts get a 403), independent of anything the
+    # Worker code itself does. A normal-looking one is enough to pass that
+    # check -- this isn't evading anything, it's our own client talking to
+    # our own deployed backend.
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; DronePVO/1.0)",
+    }
     data = None
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
