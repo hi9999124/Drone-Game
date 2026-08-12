@@ -84,7 +84,7 @@ async function handleSignup(request, env) {
   const passwordHash = await hashPassword(password);
   const userId = await createUser(env.DB, { username, passwordHash });
   const token = await issueSession(env.DB, userId);
-  return json({ token, profile: await profileWithRank(env.DB, userId) });
+  return json({ token, username, profile: await profileWithRank(env.DB, userId) });
 }
 
 async function handleLogin(request, env) {
@@ -94,7 +94,7 @@ async function handleLogin(request, env) {
     return unauthorized("Wrong username or password.");
   }
   const token = await issueSession(env.DB, user.id);
-  return json({ token, profile: await profileWithRank(env.DB, user.id) });
+  return json({ token, username: user.username, profile: await profileWithRank(env.DB, user.id) });
 }
 
 // ------------------------------------------------------------- auth: github
@@ -128,7 +128,7 @@ async function handleGithubComplete(request, env) {
   }
 
   const token = await issueSession(env.DB, user.id);
-  return json({ token, profile: await profileWithRank(env.DB, user.id) });
+  return json({ token, username: user.username, profile: await profileWithRank(env.DB, user.id) });
 }
 
 // ------------------------------------------------------------- auth: google
@@ -192,7 +192,7 @@ async function handleGoogleDevicePoll(request, env) {
   }
 
   const token = await issueSession(env.DB, user.id);
-  return json({ status: "ok", token, profile: await profileWithRank(env.DB, user.id) });
+  return json({ status: "ok", token, username: user.username, profile: await profileWithRank(env.DB, user.id) });
 }
 
 function decodeJwtPayload(jwt) {

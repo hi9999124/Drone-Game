@@ -467,8 +467,8 @@ class AccountMenu(Screen):
         self.device_state = None
         self.on_back()
 
-    def _apply_login_result(self, username, result):
-        self.data["account"]["username"] = username
+    def _apply_login_result(self, result):
+        self.data["account"]["username"] = result["username"]
         self.data["account"]["token"] = result["token"]
         profile = result["profile"]
         # Server totals become the local totals on sign-in -- this is the
@@ -503,14 +503,14 @@ class AccountMenu(Screen):
             if self.pending.error:
                 self.error = self.pending.error
             else:
-                self._apply_login_result(self.username_field.text, self.pending.value)
+                self._apply_login_result(self.pending.value)
             self.pending = None
 
         if self.device_state is not None and self.device_state.status == "done":
-            username = self.device_state.result["profile"].get("username") or self.username_field.text
-            # GitHub/Google logins pick their own username server-side; ask
-            # /me-equivalent info already embedded in the login result.
-            self._apply_login_result(self.data["account"].get("username") or username, self.device_state.result)
+            # GitHub/Google logins pick their own username server-side
+            # (there's no field for the player to type one), so the
+            # response's own "username" is the only source of truth here.
+            self._apply_login_result(self.device_state.result)
             self.device_state = None
         elif self.device_state is not None and self.device_state.status == "error":
             self.error = self.device_state.message
