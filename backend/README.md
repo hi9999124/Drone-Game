@@ -9,6 +9,18 @@ optional cross-device sync and the online leaderboard. Every endpoint here was
 tested locally against a real (local) D1 database before being written up
 below; nothing here is unverified.
 
+There are two ways to deploy this: the CLI (`wrangler`, needs Node.js
+installed locally) or the Cloudflare dashboard alone (no installs, just
+paste things into the browser). Pick one:
+
+- **CLI** — see "One-time setup" below. Handles both the database and the
+  Worker code, and is what `backend/README.md`'s later sections (GitHub/
+  Google secrets) assume.
+- **Dashboard only** — see "Dashboard-only setup" further down. Everything
+  is copy-paste into the Cloudflare web console; no terminal needed at all.
+  Slightly more manual for the D1 binding step, and Google sign-in's secret
+  still needs one CLI-free equivalent (also covered there).
+
 ## One-time setup
 
 You need a Cloudflare account (free) and Node.js installed locally.
@@ -50,6 +62,98 @@ it goes into the game client next (see "Wire up the game client" below).
 
 At this point username/password sign-up, login, coins/XP/levels, and the
 leaderboard are fully live. GitHub and Google sign-in need one more step each.
+
+## Dashboard-only setup (no CLI)
+
+Everything here happens at <https://dash.cloudflare.com> in the browser.
+
+### 1. Create the database
+
+**Storage & Databases -> D1 SQL Database -> Create Database.** Name it
+`dronepvo`, create it.
+
+### 2. Create the tables
+
+Open the new database, go to its **Console** tab, and paste this in and run
+it (this is the exact contents of `backend/schema.sql` -- nothing to edit):
+
+```sql
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  email TEXT,
+  password_hash TEXT,
+  github_id TEXT UNIQUE,
+  google_sub TEXT UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS profiles (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  coins INTEGER NOT NULL DEFAULT 0,
+  xp INTEGER NOT NULL DEFAULT 0,
+  level INTEGER NOT NULL DEFAULT 1,
+  best_score INTEGER NOT NULL DEFAULT 0,
+  total_score INTEGER NOT NULL DEFAULT 0,
+  missions_completed INTEGER NOT NULL DEFAULT 0,
+  targets_destroyed INTEGER NOT NULL DEFAULT 0,
+  enemies_destroyed INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_best_score ON profiles(best_score DESC);
+CREATE INDEX IF NOT EXISTS idx_profiles_total_score ON profiles(total_score DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+```
+
+You should see three tables appear (`users`, `profiles`, `sessions`) in that
+same tab's schema browser once it runs.
+
+### 3. Create the Worker and paste in the code
+
+**Compute (Workers & Pages) -> Create -> Workers -> deploy a "Hello World"
+starter** (any starting template is fine, you're about to replace it). Name
+it `dronepvo-backend`, create it, then **Edit code** (the in-browser editor).
+
+The actual Worker is written as several source files with imports between
+them (`backend/src/`), which the browser editor can't run directly -- so
+instead, replace the editor's contents with the single bundled file below,
+which is the same code with everything inlined into one file. It's generated
+from source with `npm run bundle` (`backend/dist/worker-bundled.js`,
+git-ignored since it's just a build output) and produces byte-identical
+behavior to the multi-file version -- verified by running the actual
+signup/leaderboard/404 checks against it locally before writing this.
+
+*(The bundled file's full contents were sent alongside this message -- open
+it, select all, copy, and paste over everything in the editor.)*
+
+Click **Deploy**. Cloudflare shows you the Worker's URL, something like
+`https://dronepvo-backend.<your-subdomain>.workers.dev` -- copy it for the
+"Wire up the game client" step below.
+
+### 4. Attach the D1 database to the Worker
+
+Back on the Worker's page: **Settings -> Bindings -> Add -> D1 Database.**
+- **Variable name**: `DB` (must be exactly this -- the code reads
+  `env.DB`)
+- **D1 database**: the `dronepvo` database from step 1
+
+Save, and it'll prompt to redeploy -- confirm that.
+
+At this point you're at the same place the CLI path reaches after its step
+3: username/password auth, coins/XP/levels, and the leaderboard are live.
+GitHub sign-in setup below is identical either way. For Google (needs a
+secret, which the CLI path sets via `wrangler secret put`), the dashboard
+equivalent is the same **Settings -> Bindings** page: **Add -> Secret**,
+name `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, paste the values from the
+Google setup below, save, redeploy.
 
 ## GitHub sign-in setup
 
