@@ -56,8 +56,13 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
       controlled hazard in the existing single-player mission for now; the
       same `PVOTurret`/`PVOUnitType` system is the foundation the *playable*
       PVO Defenders faction (see "Teams & multiplayer" below) builds on.
-- [ ] **Civilians (survival) team** and a **playable PVO Defenders team** —
-      see "Teams & multiplayer" below
+- [x] **Playable PVO Defenders (Air Defense mode)**: choose your side from
+      the main menu. Man a flak gun or SAM site (`src/entities/player_turret.py`)
+      defending civilian structures (`Building.is_protected`) from waves of
+      attacking BPLAs (`src/entities/raider.py`), mission rules in
+      `src/defense_world.py`. Single-player against AI raiders for now;
+      networking this against a human Drone player is Stage 3 below.
+- [ ] **Civilians (survival) team** — see "Teams & multiplayer" below
 - [ ] Audio (engine loop, explosions) — no sound at all right now
 
 ## Fixed bugs (worth knowing if you touch this code again)
@@ -217,15 +222,17 @@ exist yet, and you can't build rooms/matchmaking on top of a simulation that
 isn't authoritative. Building it out of order means rewriting whatever came
 first.
 
-**Stage 1 -- PVO Defenders content (in progress).**
+**Stage 1 -- PVO Defenders content (done).**
 `PVOTurret`/`PVOUnitType` (flak + SAM, radar detection, lock-on warning,
-homing missiles) exist now as AI hazards in the single-player Drone mission.
-Next: more unit types (radar station buffing nearby SAM range, a mobile
-short-range SAM), and a **player-controlled Air Defense mission mode** --
-you play a PVO operator defending the city against AI drone waves, using the
-exact same `PVOTurret` mechanics. This proves the faction is fun and
-balanced *before* any networking touches it, and is what a networked human
-PVO player will actually be controlling later.
+homing missiles) exist as AI hazards in the Drone Strike mission, and the
+same weapon stats now drive a fully playable **Air Defense mode** -- pick a
+side from the main menu, man a turret, defend civilian structures from wave
+after wave of attacking BPLAs. This proved the faction is fun and balanced
+*before* any networking touches it (verified via scripted-pilot headless
+testing across every difficulty, same as every other balance pass this
+project has had), and is exactly what a networked human PVO player will be
+controlling once Stage 3 exists. Remaining, lower-priority polish: more unit
+types (a radar station buffing nearby SAM range, a mobile short-range SAM).
 
 **Stage 2 -- Civilians (survival) mode.**
 A new mission type, playable solo or (later) alongside a Drone or PVO
