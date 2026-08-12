@@ -189,7 +189,7 @@ class DroneSelectMenu(Screen):
         y = rect.y + 150
         for label, value in stats:
             self._draw_stat_bar(surface, rect.x + 16, y, rect.width - 32, label, value, drone_type, unlocked)
-            y += 26
+            y += 22
 
         if unlocked:
             loadout = (
@@ -203,7 +203,13 @@ class DroneSelectMenu(Screen):
             ability = get_font(15, bold=True).render(drone_type.ability_name, True, drone_type.accent_color)
             surface.blit(ability, (rect.x + 16, y + 28))
             self._draw_wrapped(
-                surface, drone_type.ability_desc, rect.x + 16, y + 50, rect.width - 32, constants.TEXT_FAINT
+                surface,
+                drone_type.ability_desc,
+                rect.x + 16,
+                y + 48,
+                rect.width - 32,
+                constants.TEXT_FAINT,
+                max_bottom=rect.bottom - 10,
             )
         else:
             lock = get_font(16, bold=True).render("LOCKED", True, constants.WARN)
@@ -238,21 +244,37 @@ class DroneSelectMenu(Screen):
         color = drone_type.accent_color if unlocked else (60, 66, 78)
         pygame.draw.rect(surface, color, (bar_x, y + 3, fill, 8), border_radius=4)
 
-    def _draw_wrapped(self, surface, text, x, y, width, color):
+    def _draw_wrapped(self, surface, text, x, y, width, color, max_bottom=None):
+        """Word-wraps into `width`-wide lines. If `max_bottom` is given, the
+        text is hard-clipped there with an ellipsis on the last visible line
+        instead of drawing past it -- a card's fixed height must never be at
+        the mercy of exactly how long some future drone's description is."""
         font = get_font(13)
+        line_h = 16
         words = text.split()
+        lines = []
         line = ""
-        line_y = y
         for word in words:
             probe = f"{line} {word}".strip()
             if font.size(probe)[0] > width and line:
-                surface.blit(font.render(line, True, color), (x, line_y))
-                line_y += 16
+                lines.append(line)
                 line = word
             else:
                 line = probe
         if line:
-            surface.blit(font.render(line, True, color), (x, line_y))
+            lines.append(line)
+
+        if max_bottom is not None:
+            max_lines = max(1, int((max_bottom - y) // line_h) + 1)
+            if len(lines) > max_lines:
+                lines = lines[:max_lines]
+                last = lines[-1]
+                while last and font.size(last + "...")[0] > width:
+                    last = last[:-1]
+                lines[-1] = last.rstrip() + "..."
+
+        for i, rendered in enumerate(lines):
+            surface.blit(font.render(rendered, True, color), (x, y + i * line_h))
 
 
 class SettingsMenu(Screen):
@@ -403,15 +425,29 @@ class AccountMenu(Screen):
         self.password_field = TextInput((cx - field_w // 2, 264, field_w, 44), placeholder="password", password=True)
         self.fields = [self.username_field, self.password_field]
 
+        # LOG OUT and "signed-in BACK" get their own side-by-side pair,
+        # separate from the solo centered `back_btn` used by the login form
+        # and device-flow screens -- they used to share one rect with BACK,
+        # which hid LOG OUT entirely behind it and made a single click fire
+        # both (silently logging out while only ever appearing to go "back").
         self.widgets = [
             Button((cx - 164, 322, 160, 46), "LOG IN", self._start_login, font_size=18),
             Button((cx + 4, 322, 160, 46), "SIGN UP", self._start_signup, font_size=18),
             Button((cx - 164, 380, 328, 44), "SIGN IN WITH GITHUB", self._start_github, font_size=17),
             Button((cx - 164, 432, 328, 44), "SIGN IN WITH GOOGLE", self._start_google, font_size=17),
-            Button((cx - 110, 500, 220, 48), "LOG OUT", self._log_out, font_size=20),
             Button((cx - 110, 500, 220, 48), "BACK", self._cancel_and_back, font_size=20),
+            Button((cx - 220, 500, 200, 48), "LOG OUT", self._log_out, font_size=20),
+            Button((cx + 20, 500, 200, 48), "BACK", self._cancel_and_back, font_size=20),
         ]
-        self.log_in_btn, self.sign_up_btn, self.github_btn, self.google_btn, self.logout_btn, self.back_btn = self.widgets
+        (
+            self.log_in_btn,
+            self.sign_up_btn,
+            self.github_btn,
+            self.google_btn,
+            self.back_btn,
+            self.logout_btn,
+            self.signed_in_back_btn,
+        ) = self.widgets
 
     @property
     def signed_in(self):
@@ -489,7 +525,7 @@ class AccountMenu(Screen):
 
     def handle_event(self, event, mouse_pos):
         if self.signed_in or self.busy:
-            for widget in (self.logout_btn, self.back_btn) if self.signed_in else (self.back_btn,):
+            for widget in (self.logout_btn, self.signed_in_back_btn) if self.signed_in else (self.back_btn,):
                 widget.handle_event(event, mouse_pos)
             return
         for field in self.fields:
@@ -599,7 +635,7 @@ class AccountMenu(Screen):
             y += 34
 
         self.logout_btn.draw(surface)
-        self.back_btn.draw(surface)
+        self.signed_in_back_btn.draw(surface)
 
 
 class LeaderboardMenu(Screen):

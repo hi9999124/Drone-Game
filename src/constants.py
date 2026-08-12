@@ -1,4 +1,10 @@
 WIDTH, HEIGHT = 1280, 720
+# The windowed-mode design resolution. WIDTH/HEIGHT above get overwritten at
+# runtime to the real display size when fullscreen is toggled on (so every
+# menu/HUD coordinate, which is computed fresh off WIDTH/HEIGHT, lays out
+# sharply at native resolution instead of a blurry stretched 1280x720) --
+# these two stay fixed so toggling fullscreen back off knows what to restore.
+WINDOWED_WIDTH, WINDOWED_HEIGHT = WIDTH, HEIGHT
 FPS = 60
 
 # --- World / 2.5D projection -------------------------------------------------
