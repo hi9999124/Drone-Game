@@ -29,6 +29,7 @@ STATE_RESULT = "result"
 # python-for-android sets this env var; it's the standard way to detect
 # "running as a packaged Android app" from within the app itself.
 IS_ANDROID = "ANDROID_ARGUMENT" in os.environ
+IS_WINDOWS = sys.platform == "win32"
 
 
 class Game:
@@ -42,6 +43,7 @@ class Game:
         self.settings = self.data["settings"]
         self.pending_score_submit = None
 
+        self.screen = None
         if IS_ANDROID:
             # Phones vary in resolution, so take a fullscreen surface at native
             # size and update the shared constants before any UI lays itself out.
@@ -130,6 +132,10 @@ class Game:
         self._autosave()
 
     def _apply_display_mode(self):
+        if IS_WINDOWS:
+            self._apply_display_mode_windows()
+            return
+
         # Genuinely change resolution (like the Android branch above always
         # has) rather than stretching a fixed 1280x720 buffer to fit --
         # SCALED was tried first and made fullscreen look blurry/pixelated
@@ -137,18 +143,9 @@ class Game:
         # constants.WIDTH/HEIGHT get overwritten to match, and every menu's
         # cached layout is rebuilt below so it's sharp at the real size.
         #
-        # (0, 0) + FULLSCREEN is the specific pygame/SDL idiom for "cover the
-        # desktop at its current mode" (SDL_WINDOW_FULLSCREEN_DESKTOP) --
-        # this is the exact call the Android branch above already uses with
-        # no reported issues. What actually caused an earlier black-screen/
-        # every-other-app-loses-fullscreen bug was requesting an *explicit*
-        # non-native resolution (e.g. the fixed 1280x720 design size) together
-        # with FULLSCREEN, which is a real exclusive-mode request and can
-        # force an actual display mode switch -- that's a different, narrower
-        # case than this one. A hand-rolled borderless-window replacement
-        # was tried in between and positioned/sized itself incorrectly on
-        # the reporting user's machine, so it's gone; this matches Android's
-        # already-proven path instead of inventing a new one.
+        # (0, 0) + FULLSCREEN is the pygame/SDL idiom for "cover the desktop
+        # at its current mode" (SDL_WINDOW_FULLSCREEN_DESKTOP) -- the same
+        # call the Android branch above already uses with no issues.
         fullscreen = self.settings.get("fullscreen", False)
         try:
             if fullscreen:
@@ -163,6 +160,51 @@ class Game:
             self.screen = pygame.display.set_mode((constants.WINDOWED_WIDTH, constants.WINDOWED_HEIGHT))
 
         constants.WIDTH, constants.HEIGHT = self.screen.get_size()
+
+    def _apply_display_mode_windows(self):
+        """Windows gets a fundamentally different mechanism: a normal,
+        resizable window whose "fullscreen" is just the OS's own maximize --
+        the literal same ShowWindow(SW_MAXIMIZE) call behind every other
+        app's maximize button (and Win+Up / double-clicking the title bar).
+        Three earlier attempts at doing this through SDL's own fullscreen
+        display modes each broke in a different Windows-specific way (a real
+        display mode switch disrupting every other app's fullscreen state, a
+        hand-rolled borderless window positioning itself incorrectly, DPI
+        virtualization cutting the window down to one corner) -- asking
+        Windows to do exactly what it already does for every other window
+        sidesteps all of that, since it can't behave differently for us than
+        it does for "other apps" queried directly.
+
+        The window itself is only ever created once; toggling fullscreen
+        after that is just maximize/restore on the existing window rather
+        than recreating it (recreating was part of what made earlier
+        attempts fragile). The resulting resize arrives as a VIDEORESIZE
+        event on a later frame (see _handle_events), which is what actually
+        updates constants.WIDTH/HEIGHT and reflows menus/touch layout --
+        ShowWindow doesn't resize anything synchronously from Python's side,
+        and this same event path also picks up the player manually
+        dragging/snapping/maximizing the window themselves.
+        """
+        try:
+            if self.screen is None:
+                self.screen = pygame.display.set_mode(
+                    (constants.WINDOWED_WIDTH, constants.WINDOWED_HEIGHT), pygame.RESIZABLE
+                )
+                constants.WIDTH, constants.HEIGHT = self.screen.get_size()
+
+            import ctypes
+
+            hwnd = pygame.display.get_wm_info()["window"]
+            sw_maximize, sw_restore = 3, 9
+            ctypes.windll.user32.ShowWindow(hwnd, sw_maximize if self.settings.get("fullscreen", False) else sw_restore)
+        except (pygame.error, OSError, KeyError, AttributeError):
+            # No usable display/window handle (e.g. SDL's "dummy" video
+            # driver used for headless testing) -- fall back to a plain
+            # windowed surface rather than crashing.
+            self.settings["fullscreen"] = False
+            if self.screen is None:
+                self.screen = pygame.display.set_mode((constants.WINDOWED_WIDTH, constants.WINDOWED_HEIGHT))
+                constants.WIDTH, constants.HEIGHT = self.screen.get_size()
 
     def _reflow_for_resolution(self):
         """Rebuilds everything whose layout was cached off constants.WIDTH/
@@ -292,6 +334,16 @@ class Game:
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F11 and not IS_ANDROID:
                 self._toggle_fullscreen()
+                continue
+
+            if event.type == pygame.VIDEORESIZE:
+                # Fires for any resize of a RESIZABLE window (Windows only,
+                # see _apply_display_mode_windows) -- both our own maximize/
+                # restore and the player manually dragging/snapping/
+                # maximizing it themselves land here uniformly.
+                self.screen = pygame.display.set_mode(event.size, pygame.RESIZABLE)
+                constants.WIDTH, constants.HEIGHT = event.size
+                self._reflow_for_resolution()
                 continue
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
