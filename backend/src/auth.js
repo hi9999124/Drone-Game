@@ -2,7 +2,13 @@
 // but PBKDF2-SHA256 with a high iteration count is a legitimate, standard
 // choice and needs no external dependency) and session token helpers.
 
-const PBKDF2_ITERATIONS = 120000;
+// Cloudflare Workers' PBKDF2 implementation hard-caps iteration counts at
+// 100000 and throws NotSupportedError above that -- confirmed by the actual
+// runtime error, not documentation. 120000 was over that cap, so every
+// signup/login was failing with a 500 from the moment this shipped. The
+// iteration count is stored per-password (see hashPassword below), so
+// lowering it here doesn't invalidate anything that did somehow get hashed.
+const PBKDF2_ITERATIONS = 100000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 function toHex(buffer) {
