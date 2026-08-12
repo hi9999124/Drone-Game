@@ -91,7 +91,12 @@ DRONE_TYPES = [
         subtitle="Long-range loitering munition",
         attack="ram",
         max_hp=4,
-        units=2,
+        # A mission always spawns exactly 5 targets (see world.py's
+        # _generate_city), and a ram-type drone consumes one airframe per
+        # strike whether it hits or misses -- 2 units meant this drone could
+        # never destroy more than 2/5 targets no matter how it was flown.
+        # Matches FPV Kamikaze's unit count so a flawless run can actually win.
+        units=5,
         thrust=800.0,
         reverse_thrust=140.0,
         turn_speed=72.0,
