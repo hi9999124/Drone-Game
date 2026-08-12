@@ -6,7 +6,7 @@ compatibility_date = "2026-08-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "dronepvo"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "d19fea84-ac7b-484d-b773-188c74704820"
 
 # Stage 4: internet room play (public/private rooms, WebSocket relay).
 # No setup needed beyond deploying -- unlike D1, Durable Objects don't need
