@@ -1,6 +1,7 @@
 import pygame
 
 from .. import backend, constants, drones
+from ..entities import pvo
 from ..save_system import DIFFICULTIES
 from ..utils import clamp
 from .button import Button, OptionRow
@@ -12,6 +13,40 @@ def _overlay():
     surface = pygame.Surface((constants.WIDTH, constants.HEIGHT), pygame.SRCALPHA)
     surface.fill(constants.OVERLAY)
     return surface
+
+
+def draw_wrapped_text(surface, text, x, y, width, color, max_bottom=None):
+    """Word-wraps into `width`-wide lines. If `max_bottom` is given, the text
+    is hard-clipped there with an ellipsis on the last visible line instead
+    of drawing past it -- a card's fixed height must never be at the mercy
+    of exactly how long some description happens to be. Shared by every
+    card-style menu (drone/PVO unit select) rather than duplicated per class."""
+    font = get_font(13)
+    line_h = 16
+    words = text.split()
+    lines = []
+    line = ""
+    for word in words:
+        probe = f"{line} {word}".strip()
+        if font.size(probe)[0] > width and line:
+            lines.append(line)
+            line = word
+        else:
+            line = probe
+    if line:
+        lines.append(line)
+
+    if max_bottom is not None:
+        max_lines = max(1, int((max_bottom - y) // line_h) + 1)
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            last = lines[-1]
+            while last and font.size(last + "...")[0] > width:
+                last = last[:-1]
+            lines[-1] = last.rstrip() + "..."
+
+    for i, rendered in enumerate(lines):
+        surface.blit(font.render(rendered, True, color), (x, y + i * line_h))
 
 
 class Screen:
@@ -100,6 +135,59 @@ class MainMenu(Screen):
             constants.TEXT_FAINT,
         )
         surface.blit(hint, hint.get_rect(center=(constants.WIDTH // 2, constants.HEIGHT - 30)))
+
+
+class ModeSelectMenu(Screen):
+    """Pick a side before picking a loadout: attack (Drone Strike, the
+    original mission) or defend (Air Defense, manning a PVO turret against
+    incoming raiders)."""
+
+    title = "CHOOSE YOUR SIDE"
+    dim_background = True
+
+    def __init__(self, on_drone_mode, on_defense_mode, on_back):
+        super().__init__()
+        cx = constants.WIDTH // 2
+        card_w, card_h = 260, 190
+        gap = 40
+        left_x = cx - card_w - gap // 2
+        right_x = cx + gap // 2
+        self.cards = [
+            (pygame.Rect(left_x, 220, card_w, card_h), "DRONE STRIKE", on_drone_mode, constants.ACCENT),
+            (pygame.Rect(right_x, 220, card_w, card_h), "AIR DEFENSE", on_defense_mode, constants.GOOD),
+        ]
+        self.widgets = [Button((cx - 110, 460, 220, 48), "BACK", on_back, font_size=20)]
+
+    def handle_event(self, event, mouse_pos):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for rect, _label, callback, _color in self.cards:
+                if rect.collidepoint(mouse_pos):
+                    callback()
+                    return True
+        return super().handle_event(event, mouse_pos)
+
+    def draw(self, surface):
+        super().draw(surface)
+        mouse_pos = pygame.mouse.get_pos()
+        for rect, label, _callback, color in self.cards:
+            hovered = rect.collidepoint(mouse_pos)
+            bg = (24, 30, 42) if hovered else constants.PANEL_BG
+            pygame.draw.rect(surface, bg, rect, border_radius=12)
+            pygame.draw.rect(surface, color, rect, width=2, border_radius=12)
+
+            title = get_font(24, bold=True).render(label, True, color)
+            surface.blit(title, title.get_rect(center=(rect.centerx, rect.y + 46)))
+
+            lines = (
+                ["Fly a drone and destroy", "the city's marked targets."]
+                if label == "DRONE STRIKE"
+                else ["Man a PVO turret and defend", "civilian structures from", "incoming raiders."]
+            )
+            y = rect.y + 92
+            for line in lines:
+                surf = get_font(14).render(line, True, constants.TEXT_DIM)
+                surface.blit(surf, surf.get_rect(center=(rect.centerx, y)))
+                y += 20
 
 
 class HowToMenu(Screen):
@@ -265,7 +353,7 @@ class DroneSelectMenu(Screen):
 
             ability = get_font(15, bold=True).render(drone_type.ability_name, True, drone_type.accent_color)
             surface.blit(ability, (rect.x + 16, y + 28))
-            self._draw_wrapped(
+            draw_wrapped_text(
                 surface,
                 drone_type.ability_desc,
                 rect.x + 16,
@@ -307,37 +395,89 @@ class DroneSelectMenu(Screen):
         color = drone_type.accent_color if unlocked else (60, 66, 78)
         pygame.draw.rect(surface, color, (bar_x, y + 3, fill, 8), border_radius=4)
 
-    def _draw_wrapped(self, surface, text, x, y, width, color, max_bottom=None):
-        """Word-wraps into `width`-wide lines. If `max_bottom` is given, the
-        text is hard-clipped there with an ellipsis on the last visible line
-        instead of drawing past it -- a card's fixed height must never be at
-        the mercy of exactly how long some future drone's description is."""
-        font = get_font(13)
-        line_h = 16
-        words = text.split()
-        lines = []
-        line = ""
-        for word in words:
-            probe = f"{line} {word}".strip()
-            if font.size(probe)[0] > width and line:
-                lines.append(line)
-                line = word
-            else:
-                line = probe
-        if line:
-            lines.append(line)
 
-        if max_bottom is not None:
-            max_lines = max(1, int((max_bottom - y) // line_h) + 1)
-            if len(lines) > max_lines:
-                lines = lines[:max_lines]
-                last = lines[-1]
-                while last and font.size(last + "...")[0] > width:
-                    last = last[:-1]
-                lines[-1] = last.rstrip() + "..."
 
-        for i, rendered in enumerate(lines):
-            surface.blit(font.render(rendered, True, color), (x, y + i * line_h))
+class DefenseSelectMenu(Screen):
+    """Pick a PVO unit for Air Defense mode. No unlock-gating (unlike drone
+    airframes) -- both units are meaningfully different playstyles, not a
+    progression reward, and the mode is new enough that gatekeeping either
+    one behind score would just mean fewer people ever see the SAM site."""
+
+    title = "SELECT AIR DEFENSE UNIT"
+    dim_background = True
+
+    def __init__(self, on_start, on_back):
+        super().__init__()
+        self.on_start = on_start
+        self.selected_key = pvo.PVO_UNIT_TYPES[0].key
+        cx = constants.WIDTH // 2
+        card_w, card_h = 280, 320
+        gap = 30
+        total_w = len(pvo.PVO_UNIT_TYPES) * card_w + (len(pvo.PVO_UNIT_TYPES) - 1) * gap
+        start_x = cx - total_w // 2
+        self.cards = []
+        for index, unit_type in enumerate(pvo.PVO_UNIT_TYPES):
+            rect = pygame.Rect(start_x + index * (card_w + gap), 150, card_w, card_h)
+            self.cards.append((rect, unit_type))
+
+        button_y = 150 + card_h + 24
+        self.widgets = [
+            Button((cx - 240, button_y, 220, 54), "DEPLOY", self._start, font_size=24),
+            Button((cx + 20, button_y, 220, 54), "BACK", on_back, font_size=24),
+        ]
+
+    def _start(self):
+        self.on_start(self.selected_key)
+
+    def handle_event(self, event, mouse_pos):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for rect, unit_type in self.cards:
+                if rect.collidepoint(mouse_pos):
+                    self.selected_key = unit_type.key
+                    return True
+        return super().handle_event(event, mouse_pos)
+
+    def draw(self, surface):
+        super().draw(surface)
+        for rect, unit_type in self.cards:
+            self._draw_card(surface, rect, unit_type)
+
+    def _draw_card(self, surface, rect, unit_type):
+        selected = unit_type.key == self.selected_key
+        bg = (24, 30, 42) if selected else constants.PANEL_BG
+        pygame.draw.rect(surface, bg, rect, border_radius=12)
+        edge = unit_type.accent_color if selected else constants.PANEL_EDGE
+        pygame.draw.rect(surface, edge, rect, width=3 if selected else 1, border_radius=12)
+
+        name = get_font(21, bold=True).render(unit_type.name, True, constants.TEXT_COLOR)
+        surface.blit(name, (rect.x + 16, rect.y + 14))
+        sub = get_font(14).render(unit_type.subtitle, True, constants.TEXT_FAINT)
+        surface.blit(sub, (rect.x + 16, rect.y + 42))
+
+        stats = [
+            ("DETECT RANGE", f"{unit_type.detect_range:.0f}m"),
+            ("DAMAGE / HIT", f"{unit_type.damage:.1f}"),
+            ("RELOAD", f"{unit_type.cooldown:.1f}s"),
+            ("GUIDANCE", "Homing missile" if unit_type.homing else "Unguided burst"),
+        ]
+        y = rect.y + 90
+        for label, value in stats:
+            label_surf = get_font(12, mono=True).render(label, True, constants.TEXT_FAINT)
+            surface.blit(label_surf, (rect.x + 16, y))
+            value_surf = get_font(15, bold=True, mono=True).render(value, True, unit_type.accent_color)
+            surface.blit(value_surf, (rect.x + 16, y + 18))
+            y += 48
+
+        desc = (
+            "Cheap, rapid-fire, low-altitude only -- good against anything"
+            " flying low, out of its depth against a high cruise."
+            if unit_type.key == "aagun"
+            else "Long-range, any altitude, guided -- slow to reload, but a"
+            " lock is very hard to simply outrun."
+        )
+        draw_wrapped_text(
+            surface, desc, rect.x + 16, y + 6, rect.width - 32, constants.TEXT_DIM, max_bottom=rect.bottom - 10
+        )
 
 
 class SettingsMenu(Screen):
@@ -414,7 +554,7 @@ class PauseMenu(Screen):
         y = 200
         for label, callback in (
             ("RESUME", on_resume),
-            ("CHANGE AIRFRAME", on_change_drone),
+            ("CHANGE LOADOUT", on_change_drone),
             ("SETTINGS", on_settings),
             ("HOW TO PLAY", on_howto),
             ("MAIN MENU", on_main_menu),
@@ -437,7 +577,7 @@ class ResultMenu(Screen):
         y = 430
         for label, callback in (
             ("FLY AGAIN", on_retry),
-            ("CHANGE AIRFRAME", on_change_drone),
+            ("CHANGE LOADOUT", on_change_drone),
             ("MAIN MENU", on_main_menu),
         ):
             self.widgets.append(Button((cx - 140, y, 280, 52), label, callback, font_size=22))

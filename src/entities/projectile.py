@@ -49,7 +49,7 @@ class Projectile:
     def _homing_target_alive(self):
         return self.target is not None and getattr(self.target, "alive_and_well", False)
 
-    def update(self, dt, buildings):
+    def update(self, dt, buildings, hit_targets=None):
         if not self.alive:
             return None
 
@@ -78,6 +78,26 @@ class Projectile:
             self.altitude = 0.0
             self.alive = False
             return self._detonation()
+
+        # Direct hit on a moving target (e.g. Air Defense mode's raiders).
+        # Without this, a projectile only ever detonates against a building,
+        # the ground, or its own timeout -- invisible when everything you
+        # shoot at is a stationary building (Strike mode), fatal when the
+        # entire point is hitting something that's flying (Defense mode).
+        # None by default so Strike mode's already-verified building-splash
+        # behaviour is completely unaffected.
+        if hit_targets:
+            for entity in hit_targets:
+                if not getattr(entity, "alive", True):
+                    continue
+                dist = (pygame.Vector2(entity.pos) - self.pos).length()
+                hit_radius = getattr(entity, "radius", 15.0) + 10.0
+                # A blast has some real vertical extent too, not a razor-thin
+                # plane -- generous enough to cover an unguided flak round
+                # fired near ground level reaching a low-flying raider.
+                if dist <= hit_radius and abs(entity.altitude - self.altitude) <= 70.0:
+                    self.alive = False
+                    return self._detonation()
 
         for building in buildings:
             if building.destroyed:

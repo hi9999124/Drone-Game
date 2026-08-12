@@ -21,6 +21,8 @@ RESULT_LOST = "lost"
 class World:
     """Owns the city, everything flying in it, and the win/lose rules."""
 
+    mode = "strike"
+
     def __init__(self, drone_type, difficulty, seed=None):
         self.drone_type = drone_type
         self.difficulty = difficulty

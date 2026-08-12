@@ -5,13 +5,16 @@ import pygame
 
 from . import backend, constants, drones, leveling, save_system, world as world_module
 from .camera import Camera
+from .defense_world import DefenseWorld
 from .ui.hud import HUD
 from .ui.menu import (
     AccountMenu,
+    DefenseSelectMenu,
     DroneSelectMenu,
     HowToMenu,
     LeaderboardMenu,
     MainMenu,
+    ModeSelectMenu,
     PauseMenu,
     ResultMenu,
     SettingsMenu,
@@ -19,7 +22,9 @@ from .ui.menu import (
 from .ui.touch_controls import TouchControls
 
 STATE_MENU = "menu"
+STATE_MODE_SELECT = "mode_select"
 STATE_DRONE_SELECT = "drone_select"
+STATE_DEFENSE_SELECT = "defense_select"
 STATE_SETTINGS = "settings"
 STATE_ACCOUNT = "account"
 STATE_LEADERBOARD = "leaderboard"
@@ -73,17 +78,18 @@ class Game:
         self.main_menu = MainMenu(
             self.profile,
             self.account,
-            self._open_drone_select,
+            self._open_mode_select,
             self._open_howto,
             self._open_account,
             self._open_leaderboard,
             self._open_settings,
             self._quit,
         )
+        self.mode_select_menu = ModeSelectMenu(self._open_drone_select, self._open_defense_select, self._close_mode_select)
         self.howto_menu = HowToMenu(self._close_howto)
         self.pause_menu = PauseMenu(
             self._resume,
-            self._open_drone_select,
+            self._open_loadout_select,
             self._open_settings,
             self._open_howto,
             self._return_to_menu,
@@ -93,6 +99,7 @@ class Game:
             self.settings, self._close_settings, self._on_settings_changed, show_fullscreen_option=not IS_ANDROID
         )
         self.drone_menu = None
+        self.defense_menu = None
         self.result_menu = None
         self.account_menu = None
         self.leaderboard_menu = None
@@ -108,6 +115,13 @@ class Game:
 
     # ------------------------------------------------------------- state flow
 
+    def _open_mode_select(self):
+        self.previous_state = self.state
+        self.state = STATE_MODE_SELECT
+
+    def _close_mode_select(self):
+        self.state = STATE_PAUSED if self.previous_state == STATE_PAUSED else STATE_MENU
+
     def _open_drone_select(self):
         self.drone_menu = DroneSelectMenu(
             self.profile,
@@ -119,8 +133,26 @@ class Game:
         self.state = STATE_DRONE_SELECT
 
     def _close_drone_select(self):
-        # Back out to wherever we came from: the main menu, or a paused mission.
-        self.state = STATE_PAUSED if self.previous_state == STATE_PAUSED else STATE_MENU
+        # Back out to wherever we came from: mode select, a paused mission,
+        # or (only reachable via a stale/legacy path) the main menu directly.
+        self.state = self.previous_state if self.previous_state in (STATE_PAUSED, STATE_MODE_SELECT) else STATE_MENU
+
+    def _open_defense_select(self):
+        self.defense_menu = DefenseSelectMenu(self._start_defense_mission, self._close_defense_select)
+        self.previous_state = self.state
+        self.state = STATE_DEFENSE_SELECT
+
+    def _close_defense_select(self):
+        self.state = self.previous_state if self.previous_state in (STATE_PAUSED, STATE_MODE_SELECT) else STATE_MENU
+
+    def _open_loadout_select(self):
+        # PauseMenu's single "CHANGE LOADOUT" button dispatches to whichever
+        # select screen matches the mission already in progress -- there's
+        # no reason to make a player re-choose attack-vs-defend mid-mission.
+        if self.world is not None and self.world.mode == "defense":
+            self._open_defense_select()
+        else:
+            self._open_drone_select()
 
     def _open_howto(self):
         self.previous_state = self.state
@@ -268,8 +300,20 @@ class Game:
         self.touch.release_all()
         self.state = STATE_PLAYING
 
+    def _start_defense_mission(self, unit_key):
+        self.world = DefenseWorld(unit_key, self.settings.get("difficulty", "Normal"))
+        self.world.notify("Defend the marked structures from incoming raiders", duration=5.0)
+        self.camera.enable_shake = self.settings.get("screen_shake", True)
+        self.camera.snap_to(self.world.player.pos)
+        self._tracked_player = self.world.player
+        self.touch.release_all()
+        self.state = STATE_PLAYING
+
     def _retry(self):
-        self._start_mission(self.profile.get("last_drone", "fpv"))
+        if self.world is not None and self.world.mode == "defense":
+            self._start_defense_mission(self.world.player.type.key)
+        else:
+            self._start_mission(self.profile.get("last_drone", "fpv"))
 
     def _resume(self):
         self.touch.release_all()
@@ -327,8 +371,12 @@ class Game:
     def _active_menu(self):
         if self.state == STATE_MENU:
             return self.main_menu
+        if self.state == STATE_MODE_SELECT:
+            return self.mode_select_menu
         if self.state == STATE_DRONE_SELECT:
             return self.drone_menu
+        if self.state == STATE_DEFENSE_SELECT:
+            return self.defense_menu
         if self.state == STATE_SETTINGS:
             return self.settings_menu
         if self.state == STATE_ACCOUNT:
@@ -385,8 +433,12 @@ class Game:
             self._resume()
         elif self.state in (STATE_SETTINGS,):
             self._close_settings()
+        elif self.state == STATE_MODE_SELECT:
+            self._close_mode_select()
         elif self.state == STATE_DRONE_SELECT:
             self._close_drone_select()
+        elif self.state == STATE_DEFENSE_SELECT:
+            self._close_defense_select()
         elif self.state == STATE_ACCOUNT:
             self._close_account()
         elif self.state == STATE_LEADERBOARD:
@@ -447,11 +499,21 @@ class Game:
     def _finish_mission(self):
         world = self.world
         won = world.result == world_module.RESULT_WON
+        defense = world.mode == "defense"
 
         self.profile["total_score"] += world.score
         self.profile["best_score"] = max(self.profile["best_score"], world.score)
-        self.profile["targets_destroyed"] += world.targets_destroyed
-        self.profile["enemies_destroyed"] += world.enemies_destroyed
+        if defense:
+            # Air Defense doesn't destroy targets or fight airborne hostiles
+            # in the drone-mission sense -- raiders shot down are the closest
+            # analog to "enemies destroyed" and feed the same backend field.
+            enemies_destroyed = world.raiders_destroyed
+            targets_destroyed = 0
+        else:
+            self.profile["targets_destroyed"] += world.targets_destroyed
+            self.profile["enemies_destroyed"] += world.enemies_destroyed
+            enemies_destroyed = world.enemies_destroyed
+            targets_destroyed = world.targets_destroyed
         if won:
             self.profile["missions_completed"] += 1
 
@@ -470,20 +532,34 @@ class Game:
         token = self.account.get("token")
         if token and backend.is_configured():
             self.pending_score_submit = backend.run_async(
-                backend.submit_score, token, world.score, won, world.targets_destroyed, world.enemies_destroyed
+                backend.submit_score, token, world.score, won, targets_destroyed, enemies_destroyed
             )
 
-        summary = [
-            ("SCORE", world.score),
-            ("TARGETS DESTROYED", f"{world.targets_destroyed}/{len(world.targets)}"),
-            ("HOSTILES DOWNED", world.enemies_destroyed),
-            ("AIR DEFENSE DESTROYED", f"{world.pvo_destroyed}/{world.pvo_total}"),
-            ("AIRFRAMES LEFT", world.units_left),
-            ("COINS EARNED", f"+{coins_gained}"),
-            ("XP EARNED", f"+{xp_gained}" + ("  LEVEL UP!" if leveled_up else "")),
-            ("CAREER TOTAL", self.profile["total_score"]),
-        ]
-        self.result_menu = ResultMenu(won, summary, self._retry, self._open_drone_select, self._return_to_menu)
+        if defense:
+            summary = [
+                ("SCORE", world.score),
+                ("STRUCTURES SAVED", f"{world.protected_remaining}/{len(world.protected)}"),
+                ("RAIDERS DOWNED", world.raiders_destroyed),
+                ("WAVES SURVIVED", f"{world.wave}/{world.wave_total}"),
+                ("COINS EARNED", f"+{coins_gained}"),
+                ("XP EARNED", f"+{xp_gained}" + ("  LEVEL UP!" if leveled_up else "")),
+                ("CAREER TOTAL", self.profile["total_score"]),
+            ]
+            change_loadout = self._open_defense_select
+        else:
+            summary = [
+                ("SCORE", world.score),
+                ("TARGETS DESTROYED", f"{world.targets_destroyed}/{len(world.targets)}"),
+                ("HOSTILES DOWNED", world.enemies_destroyed),
+                ("AIR DEFENSE DESTROYED", f"{world.pvo_destroyed}/{world.pvo_total}"),
+                ("AIRFRAMES LEFT", world.units_left),
+                ("COINS EARNED", f"+{coins_gained}"),
+                ("XP EARNED", f"+{xp_gained}" + ("  LEVEL UP!" if leveled_up else "")),
+                ("CAREER TOTAL", self.profile["total_score"]),
+            ]
+            change_loadout = self._open_drone_select
+
+        self.result_menu = ResultMenu(won, summary, self._retry, change_loadout, self._return_to_menu)
         self.state = STATE_RESULT
 
     def _draw(self):

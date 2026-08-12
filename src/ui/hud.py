@@ -7,6 +7,17 @@ from .fonts import get_font
 
 class HUD:
     def draw(self, surface, world, camera, show_fps=False, fps=0.0):
+        if world.mode == "defense":
+            self._draw_defense_hud(surface, world, camera)
+        else:
+            self._draw_strike_hud(surface, world, camera)
+        if show_fps:
+            text = get_font(15, mono=True).render(f"{fps:.0f} FPS", True, constants.TEXT_FAINT)
+            surface.blit(text, (constants.WIDTH - text.get_width() - 14, 12))
+        if world.message_timer > 0.0:
+            self._draw_message(surface, world.message)
+
+    def _draw_strike_hud(self, surface, world, camera):
         player = world.player
         if player is not None and player.alive:
             self._draw_flight_panel(surface, player)
@@ -14,11 +25,13 @@ class HUD:
         self._draw_mission_panel(surface, world)
         self._draw_compass(surface, world, camera)
         self._draw_pvo_lock(surface, world)
-        if show_fps:
-            text = get_font(15, mono=True).render(f"{fps:.0f} FPS", True, constants.TEXT_FAINT)
-            surface.blit(text, (constants.WIDTH - text.get_width() - 14, 12))
-        if world.message_timer > 0.0:
-            self._draw_message(surface, world.message)
+
+    def _draw_defense_hud(self, surface, world, camera):
+        player = world.player
+        if player is not None and player.alive:
+            self._draw_turret_panel(surface, player)
+        self._draw_defense_mission_panel(surface, world)
+        self._draw_raider_compass(surface, world, camera)
 
     def _panel(self, surface, rect):
         panel = pygame.Surface(rect.size, pygame.SRCALPHA)
@@ -165,6 +178,89 @@ class HUD:
         fill_w = int(bar_w * clamp(turret.lock_progress, 0.0, 1.0))
         if fill_w > 0:
             pygame.draw.rect(surface, color, (bar_x, bar_y, fill_w, bar_h), border_radius=4)
+
+    def _draw_turret_panel(self, surface, player):
+        rect = pygame.Rect(18, 18, 250, 128)
+        self._panel(surface, rect)
+
+        name = get_font(16, bold=True).render(player.type.name, True, player.type.accent_color)
+        surface.blit(name, (rect.x + 14, rect.y + 10))
+
+        self._bar(
+            surface,
+            pygame.Rect(rect.x + 14, rect.y + 40, rect.width - 28, 8),
+            player.hp / player.max_hp,
+            constants.GOOD if player.hp > player.max_hp * 0.35 else constants.DANGER,
+            "INTEGRITY",
+        )
+
+        ready = player.cooldown <= 0.0
+        if player.ammo <= 0:
+            status, color = "NO AMMO", constants.DANGER
+        elif ready:
+            status, color = "READY", constants.GOOD
+        else:
+            status, color = f"{player.cooldown:.1f}s", constants.WARN
+        status_surf = get_font(14, bold=True, mono=True).render(status, True, color)
+        surface.blit(status_surf, (rect.x + 14, rect.y + 70))
+
+        ammo_label = "MISSILES" if player.type.homing else "ROUNDS"
+        ammo_surf = get_font(13, mono=True).render(f"{ammo_label} {player.ammo}", True, constants.TEXT_DIM)
+        surface.blit(ammo_surf, (rect.x + 14, rect.y + 92))
+
+        key_hint = get_font(12, mono=True).render("A/D aim  -  [F] / left click fire", True, constants.TEXT_FAINT)
+        surface.blit(key_hint, (rect.x + 14, rect.y + 112))
+
+    def _draw_defense_mission_panel(self, surface, world):
+        rect = pygame.Rect(constants.WIDTH - 268, 18, 250, 116)
+        self._panel(surface, rect)
+
+        title = get_font(15, bold=True).render("AIR DEFENSE", True, constants.TEXT_DIM)
+        surface.blit(title, (rect.x + 14, rect.y + 10))
+
+        remaining = world.protected_remaining
+        total = len(world.protected)
+        structures = get_font(17, bold=True, mono=True).render(
+            f"SAVED    {remaining}/{total}", True, constants.GOOD if remaining == total else constants.WARN
+        )
+        surface.blit(structures, (rect.x + 14, rect.y + 32))
+
+        score = get_font(17, bold=True, mono=True).render(f"SCORE   {world.score:6d}", True, constants.ACCENT)
+        surface.blit(score, (rect.x + 14, rect.y + 56))
+
+        wave = get_font(13, mono=True).render(
+            f"wave {world.wave}/{world.wave_total}   raiders {len(world.raiders)}", True, constants.TEXT_FAINT
+        )
+        surface.blit(wave, (rect.x + 14, rect.y + 76))
+
+        downed = get_font(13, mono=True).render(
+            f"downed {world.raiders_destroyed}", True, constants.TEXT_FAINT
+        )
+        surface.blit(downed, (rect.x + 14, rect.y + 96))
+
+    def _draw_raider_compass(self, surface, world, camera):
+        """Edge arrows pointing at incoming raiders that are off-screen --
+        the defense-mode analog of _draw_compass, pointing at threats
+        instead of objectives."""
+        player = world.player
+        if player is None or not player.alive:
+            return
+        center = pygame.Vector2(constants.WIDTH * 0.5, constants.HEIGHT * 0.5)
+        for raider in world.raiders:
+            if not raider.alive:
+                continue
+            if camera.is_visible(raider.pos.x, raider.pos.y, 0):
+                continue
+            direction = raider.pos - player.pos
+            if direction.length_squared() < 1:
+                continue
+            direction = direction.normalize()
+            edge = center + direction * (min(constants.WIDTH, constants.HEIGHT) * 0.42)
+            perpendicular = pygame.Vector2(-direction.y, direction.x)
+            tip = edge + direction * 12
+            left = edge - direction * 6 + perpendicular * 7
+            right = edge - direction * 6 - perpendicular * 7
+            pygame.draw.polygon(surface, constants.WARN, [tip, left, right])
 
     def _draw_message(self, surface, message):
         text = get_font(26, bold=True).render(message, True, constants.WARN)

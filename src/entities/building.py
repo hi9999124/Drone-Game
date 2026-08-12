@@ -15,11 +15,15 @@ class Building:
     so the per-frame cost stays a couple of blits.
     """
 
-    def __init__(self, x, y, width, depth, height, is_target=False):
+    def __init__(self, x, y, width, depth, height, is_target=False, is_protected=False):
         self.rect = pygame.Rect(int(x), int(y), int(width), int(depth))
         self.height = float(height)
         self.is_target = is_target
-        self.max_hp = 260.0 if is_target else 0.0
+        # is_protected: the Air Defense mode's inverse of is_target -- a
+        # civilian structure raiders are trying to destroy and the player is
+        # trying to keep standing, rather than something the player attacks.
+        self.is_protected = is_protected
+        self.max_hp = 260.0 if (is_target or is_protected) else 0.0
         self.hp = self.max_hp
         self.destroyed = False
         self._windows = self._generate_windows()
@@ -48,7 +52,7 @@ class Building:
         return altitude < self.height and self.rect.collidepoint(x, y)
 
     def take_damage(self, amount):
-        if not self.is_target or self.destroyed:
+        if not (self.is_target or self.is_protected) or self.destroyed:
             return False
         self.hp -= amount
         if self.hp <= 0:
@@ -65,8 +69,12 @@ class Building:
         right, bottom = camera.to_screen(self.rect.right, self.rect.bottom, 0.0)
         lift = self.height * constants.Z_SCALE
 
-        wall_color = constants.TARGET_WALL if self.is_target else constants.BUILDING_WALL
-        roof_color = constants.TARGET_ROOF if self.is_target else constants.BUILDING_ROOF
+        if self.is_target:
+            wall_color, roof_color = constants.TARGET_WALL, constants.TARGET_ROOF
+        elif self.is_protected:
+            wall_color, roof_color = constants.PROTECTED_WALL, constants.PROTECTED_ROOF
+        else:
+            wall_color, roof_color = constants.BUILDING_WALL, constants.BUILDING_ROOF
 
         # Front wall: the face between the near (bottom) edge and the roofline.
         wall_rect = pygame.Rect(int(left), int(bottom - lift), int(right - left), int(lift))
@@ -86,6 +94,8 @@ class Building:
 
         if self.is_target:
             self._draw_target_marker(surface, roof_points, left, right, top, lift)
+        elif self.is_protected:
+            self._draw_protected_marker(surface, roof_points, left, right, top, lift)
 
     def _draw_windows(self, surface, wall_rect):
         grid, seed = self._windows
@@ -127,6 +137,29 @@ class Building:
             pygame.draw.rect(surface, (40, 20, 24), (bar_x, bar_y, bar_w, 5))
             frac = clamp(self.hp / self.max_hp, 0.0, 1.0)
             pygame.draw.rect(surface, constants.DANGER, (bar_x, bar_y, bar_w * frac, 5))
+
+    def _draw_protected_marker(self, surface, roof_points, left, right, top, lift):
+        cx = (left + right) * 0.5
+        cy = top - lift
+        pygame.draw.polygon(surface, constants.GOOD, roof_points, width=2)
+        size = 9
+        shield = [
+            (cx, cy - size),
+            (cx + size * 0.8, cy - size * 0.4),
+            (cx + size * 0.6, cy + size * 0.7),
+            (cx, cy + size),
+            (cx - size * 0.6, cy + size * 0.7),
+            (cx - size * 0.8, cy - size * 0.4),
+        ]
+        pygame.draw.polygon(surface, constants.GOOD, shield, width=2)
+
+        if self.hp < self.max_hp:
+            bar_w = max(40, (right - left) * 0.7)
+            bar_x = cx - bar_w * 0.5
+            bar_y = cy - 22
+            pygame.draw.rect(surface, (18, 34, 26), (bar_x, bar_y, bar_w, 5))
+            frac = clamp(self.hp / self.max_hp, 0.0, 1.0)
+            pygame.draw.rect(surface, constants.GOOD, (bar_x, bar_y, bar_w * frac, 5))
 
     def _draw_rubble(self, surface, camera):
         left, top = camera.to_screen(self.rect.left, self.rect.top, 0.0)
