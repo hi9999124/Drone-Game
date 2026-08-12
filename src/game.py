@@ -1,31 +1,41 @@
 import os
+import random
 import sys
 
 import pygame
 
-from . import backend, constants, drones, leveling, save_system, world as world_module
+from . import backend, constants, drones, leveling, net, save_system, world as world_module
 from .camera import Camera
 from .defense_world import DefenseWorld
+from .entities import pvo
 from .survival_world import SurvivalWorld
 from .ui.hud import HUD
 from .ui.menu import (
     AccountMenu,
     DefenseSelectMenu,
     DroneSelectMenu,
+    HostWaitingMenu,
     HowToMenu,
+    JoinMultiplayerMenu,
     LeaderboardMenu,
     MainMenu,
     ModeSelectMenu,
+    MultiplayerMenu,
     PauseMenu,
     ResultMenu,
     SettingsMenu,
 )
 from .ui.touch_controls import TouchControls
+from .versus_world import VersusWorld
 
 STATE_MENU = "menu"
 STATE_MODE_SELECT = "mode_select"
 STATE_DRONE_SELECT = "drone_select"
 STATE_DEFENSE_SELECT = "defense_select"
+STATE_MP_MENU = "mp_menu"
+STATE_MP_HOST_SELECT = "mp_host_select"
+STATE_MP_HOSTING = "mp_hosting"
+STATE_MP_JOIN = "mp_join"
 STATE_SETTINGS = "settings"
 STATE_ACCOUNT = "account"
 STATE_LEADERBOARD = "leaderboard"
@@ -33,6 +43,8 @@ STATE_HOWTO = "howto"
 STATE_PLAYING = "playing"
 STATE_PAUSED = "paused"
 STATE_RESULT = "result"
+
+MP_JOIN_TIMEOUT = 8.0
 
 # python-for-android sets this env var; it's the standard way to detect
 # "running as a packaged Android app" from within the app itself.
@@ -71,6 +83,15 @@ class Game:
         self.previous_state = STATE_MENU
         self._tracked_player = None
 
+        # Multiplayer connection state -- None whenever no match is being
+        # hosted/joined/played. See net.py + versus_world.py.
+        self._mp_net = None
+        self._mp_peer_addr = None
+        self._mp_drone_key = None
+        self._mp_pvo_unit_key = None
+        self._mp_remote_controls = {}
+        self._mp_join_timer = 0.0
+
         self._build_menus()
 
     # ------------------------------------------------------------------ setup
@@ -87,8 +108,13 @@ class Game:
             self._quit,
         )
         self.mode_select_menu = ModeSelectMenu(
-            self._open_drone_select, self._open_defense_select, self._start_survival_mission, self._close_mode_select
+            self._open_drone_select,
+            self._open_defense_select,
+            self._start_survival_mission,
+            self._open_multiplayer_menu,
+            self._close_mode_select,
         )
+        self.mp_menu = MultiplayerMenu(self._open_mp_host_select, self._open_mp_join, self._close_multiplayer_menu)
         self.howto_menu = HowToMenu(self._close_howto)
         self.pause_menu = PauseMenu(
             self._resume,
@@ -103,6 +129,9 @@ class Game:
         )
         self.drone_menu = None
         self.defense_menu = None
+        self.mp_host_select_menu = None
+        self.host_waiting_menu = None
+        self.join_menu = None
         self.result_menu = None
         self.account_menu = None
         self.leaderboard_menu = None
@@ -157,10 +186,98 @@ class Game:
         mode = self.world.mode if self.world is not None else "strike"
         if mode == "defense":
             self._open_defense_select()
-        elif mode == "survival":
-            self._open_mode_select()
+        elif mode in ("survival", "versus"):
+            # Survival has no loadout to change; Versus is a live 2-player
+            # match, so there's nothing to swap mid-match either -- both
+            # just stay paused rather than opening a screen that would make
+            # no sense to act on right now.
+            pass
         else:
             self._open_drone_select()
+
+    def _open_multiplayer_menu(self):
+        self.previous_state = self.state
+        self.state = STATE_MP_MENU
+
+    def _close_multiplayer_menu(self):
+        self.state = STATE_PAUSED if self.previous_state == STATE_PAUSED else STATE_MODE_SELECT
+
+    def _open_mp_host_select(self):
+        self.mp_host_select_menu = DroneSelectMenu(
+            self.profile,
+            self._host_multiplayer,
+            self._close_mp_host_select,
+            selected_key=self.profile.get("last_drone"),
+        )
+        self.previous_state = self.state
+        self.state = STATE_MP_HOST_SELECT
+
+    def _close_mp_host_select(self):
+        self.state = STATE_MP_MENU
+
+    def _host_multiplayer(self, drone_key):
+        self.profile["last_drone"] = drone_key
+        self._autosave()
+        self._mp_net = net.UDPTransport(port=net.DEFAULT_PORT)
+        self._mp_drone_key = drone_key
+        self._mp_peer_addr = None
+        address_text = f"{net.local_ip_hint()}:{self._mp_net.local_port}"
+        self.host_waiting_menu = HostWaitingMenu(address_text, self._cancel_multiplayer)
+        self.previous_state = self.state
+        self.state = STATE_MP_HOSTING
+
+    def _open_mp_join(self):
+        self.join_menu = JoinMultiplayerMenu(self._join_multiplayer, self._close_mp_join)
+        self.previous_state = self.state
+        self.state = STATE_MP_JOIN
+
+    def _close_mp_join(self):
+        self._cancel_multiplayer()
+
+    def _cancel_multiplayer(self):
+        if self._mp_net is not None:
+            self._mp_net.close()
+        self._mp_net = None
+        self._mp_peer_addr = None
+        self.state = STATE_MP_MENU
+
+    def _join_multiplayer(self, address_text, unit_key):
+        try:
+            host, port = net.parse_address(address_text)
+        except ValueError:
+            self.join_menu.status_text = "That doesn't look like a valid address (try IP or IP:port)."
+            return
+        if self._mp_net is not None:
+            self._mp_net.close()
+        self._mp_net = net.UDPTransport(port=0)
+        self._mp_peer_addr = (host, port)
+        self._mp_pvo_unit_key = unit_key
+        self._mp_net.send(self._mp_peer_addr, {"type": "join", "pvo_unit": unit_key})
+        self._mp_join_timer = MP_JOIN_TIMEOUT
+        self.join_menu.status_text = "Connecting..."
+
+    def _start_versus_match(self, seed, difficulty, drone_key, pvo_unit_key, is_host, local_role):
+        drone_type = drones.get(drone_key)
+        unit_type = pvo.PVO_UNITS_BY_KEY.get(pvo_unit_key, pvo.PVO_UNIT_TYPES[0])
+        self.world = VersusWorld(drone_type, unit_type, difficulty, seed, is_host=is_host, local_role=local_role)
+        self.world.notify(
+            "Match started -- destroy the targets" if local_role == "drone" else "Match started -- defend the city",
+            duration=4.0,
+        )
+        self.camera.enable_shake = self.settings.get("screen_shake", True)
+        self.camera.snap_to(self.world.player.pos)
+        self._tracked_player = self.world.player
+        self.touch.release_all()
+        self.state = STATE_PLAYING
+
+    def _teardown_multiplayer(self, notify_peer):
+        if self._mp_net is None:
+            return
+        if notify_peer and self._mp_peer_addr is not None:
+            self._mp_net.send(self._mp_peer_addr, {"type": "leave"})
+        self._mp_net.close()
+        self._mp_net = None
+        self._mp_peer_addr = None
 
     def _open_howto(self):
         self.previous_state = self.state
@@ -340,11 +457,24 @@ class Game:
         self.touch.release_all()
         self.state = STATE_PLAYING
 
+    def _leave_versus_match(self):
+        # "FLY AGAIN"/"CHANGE LOADOUT" after a versus match: there's no
+        # sensible instant rematch without a fresh host/join handshake, so
+        # both buttons just go back to the multiplayer menu. No "leave"
+        # notification needed here -- the peer already has the correct
+        # final result from the last snapshot before the match concluded.
+        self._teardown_multiplayer(notify_peer=False)
+        self._open_multiplayer_menu()
+
     def _return_to_menu(self):
+        if self.world is not None and self.world.mode == "versus":
+            self._teardown_multiplayer(notify_peer=True)
         self.world = None
         self.state = STATE_MENU
 
     def _quit(self):
+        if self.world is not None and self.world.mode == "versus":
+            self._teardown_multiplayer(notify_peer=True)
         self._autosave()
         self.running = False
 
@@ -398,6 +528,14 @@ class Game:
             return self.drone_menu
         if self.state == STATE_DEFENSE_SELECT:
             return self.defense_menu
+        if self.state == STATE_MP_MENU:
+            return self.mp_menu
+        if self.state == STATE_MP_HOST_SELECT:
+            return self.mp_host_select_menu
+        if self.state == STATE_MP_HOSTING:
+            return self.host_waiting_menu
+        if self.state == STATE_MP_JOIN:
+            return self.join_menu
         if self.state == STATE_SETTINGS:
             return self.settings_menu
         if self.state == STATE_ACCOUNT:
@@ -460,6 +598,14 @@ class Game:
             self._close_drone_select()
         elif self.state == STATE_DEFENSE_SELECT:
             self._close_defense_select()
+        elif self.state == STATE_MP_MENU:
+            self._close_multiplayer_menu()
+        elif self.state == STATE_MP_HOST_SELECT:
+            self._close_mp_host_select()
+        elif self.state == STATE_MP_HOSTING:
+            self._cancel_multiplayer()
+        elif self.state == STATE_MP_JOIN:
+            self._close_mp_join()
         elif self.state == STATE_ACCOUNT:
             self._close_account()
         elif self.state == STATE_LEADERBOARD:
@@ -495,8 +641,25 @@ class Game:
         mouse_pos = pygame.mouse.get_pos()
         self._poll_score_submit()
 
+        if self.state == STATE_MP_HOSTING:
+            self._poll_hosting()
+            menu = self._active_menu()
+            if menu is not None:
+                menu.update(mouse_pos, dt)
+            return
+
+        if self.state == STATE_MP_JOIN:
+            self._poll_joining(dt)
+            menu = self._active_menu()
+            if menu is not None:
+                menu.update(mouse_pos, dt)
+            return
+
         if self.state == STATE_PLAYING and self.world is not None:
-            self.world.update(dt, self._gather_controls())
+            if self.world.mode == "versus":
+                self._update_versus(dt)
+            else:
+                self.world.update(dt, self._gather_controls())
             if self.world.shake_request > 0.0:
                 self.camera.add_shake(self.world.shake_request)
             player = self.world.player
@@ -517,10 +680,67 @@ class Game:
         if menu is not None:
             menu.update(mouse_pos, dt)
 
+    def _poll_hosting(self):
+        for addr, msg in self._mp_net.poll():
+            if msg.get("type") == "join":
+                self._mp_peer_addr = addr
+                unit_key = msg.get("pvo_unit", pvo.PVO_UNIT_TYPES[0].key)
+                seed = random.randint(0, 2**31 - 1)
+                difficulty = self.settings.get("difficulty", "Normal")
+                self._mp_net.send(
+                    addr, {"type": "start", "seed": seed, "difficulty": difficulty, "drone_key": self._mp_drone_key}
+                )
+                self._start_versus_match(
+                    seed, difficulty, self._mp_drone_key, unit_key, is_host=True, local_role="drone"
+                )
+                return
+
+    def _poll_joining(self, dt):
+        self._mp_join_timer -= dt
+        for addr, msg in self._mp_net.poll():
+            if msg.get("type") == "start":
+                self._start_versus_match(
+                    msg["seed"], msg["difficulty"], msg["drone_key"], self._mp_pvo_unit_key,
+                    is_host=False, local_role="pvo",
+                )
+                return
+        if self._mp_join_timer <= 0.0 and self.join_menu is not None:
+            self.join_menu.status_text = "No response -- check the address and that the host is still waiting."
+            self._mp_net.close()
+            self._mp_net = None
+
+    def _update_versus(self, dt):
+        world = self.world
+        local_controls = self._gather_controls()
+        if world.is_host:
+            for _addr, msg in self._mp_net.poll():
+                msg_type = msg.get("type")
+                if msg_type == "input":
+                    self._mp_remote_controls = msg
+                elif msg_type == "leave":
+                    world.result = world_module.RESULT_WON  # the PVO side forfeited -- Drone wins
+            drone_controls = local_controls if world.local_role == "drone" else self._mp_remote_controls
+            pvo_controls = self._mp_remote_controls if world.local_role == "drone" else local_controls
+            world.host_update(dt, drone_controls, pvo_controls)
+            if self._mp_peer_addr is not None:
+                self._mp_net.send(self._mp_peer_addr, {"type": "state", **world.build_snapshot()})
+        else:
+            if self._mp_peer_addr is not None:
+                self._mp_net.send(self._mp_peer_addr, {"type": "input", **local_controls})
+            for _addr, msg in self._mp_net.poll():
+                msg_type = msg.get("type")
+                if msg_type == "state":
+                    world.apply_snapshot({k: v for k, v in msg.items() if k != "type"})
+                elif msg_type == "leave":
+                    world.result = world_module.RESULT_LOST  # the Drone side forfeited -- PVO wins
+
     def _finish_mission(self):
         world = self.world
-        won = world.result == world_module.RESULT_WON
         mode = world.mode
+        if mode == "versus":
+            self._finish_versus_match()
+            return
+        won = world.result == world_module.RESULT_WON
 
         self.profile["total_score"] += world.score
         self.profile["best_score"] = max(self.profile["best_score"], world.score)
@@ -597,6 +817,60 @@ class Game:
             change_loadout = self._open_drone_select
 
         self.result_menu = ResultMenu(won, summary, self._retry, change_loadout, self._return_to_menu)
+        self.state = STATE_RESULT
+
+    def _finish_versus_match(self):
+        # RESULT_WON/RESULT_LOST in VersusWorld are always framed from the
+        # Drone side's perspective (WON = drone won) -- reframe per which
+        # side THIS player actually played before touching any reward math.
+        world = self.world
+        is_drone = world.local_role == "drone"
+        won = (world.result == world_module.RESULT_WON) if is_drone else (world.result == world_module.RESULT_LOST)
+        local_score = world.score if is_drone else world.pvo_score
+
+        self.profile["total_score"] += local_score
+        self.profile["best_score"] = max(self.profile["best_score"], local_score)
+        if won:
+            self.profile["missions_completed"] += 1
+
+        xp_gained, coins_gained = leveling.rewards_for_score(local_score)
+        level_before = self.profile["level"]
+        self.profile["xp"] += xp_gained
+        self.profile["coins"] += coins_gained
+        self.profile["level"] = leveling.level_for_xp(self.profile["xp"])
+        leveled_up = self.profile["level"] > level_before
+        self._autosave()
+
+        token = self.account.get("token")
+        if token and backend.is_configured():
+            targets_destroyed = (len(world.targets) - world.targets_remaining) if is_drone else 0
+            airframes_downed = world.drone_type.units - world.drone_units_left if not is_drone else 0
+            self.pending_score_submit = backend.run_async(
+                backend.submit_score, token, local_score, won, targets_destroyed, airframes_downed
+            )
+
+        if is_drone:
+            summary = [
+                ("SCORE", local_score),
+                ("RESULT", "DRONE WINS" if won else "PVO WINS"),
+                ("TARGETS DESTROYED", f"{len(world.targets) - world.targets_remaining}/{len(world.targets)}"),
+                ("AIRFRAMES LEFT", world.drone_units_left),
+                ("COINS EARNED", f"+{coins_gained}"),
+                ("XP EARNED", f"+{xp_gained}" + ("  LEVEL UP!" if leveled_up else "")),
+                ("CAREER TOTAL", self.profile["total_score"]),
+            ]
+        else:
+            summary = [
+                ("SCORE", local_score),
+                ("RESULT", "PVO WINS" if won else "DRONE WINS"),
+                ("AIRFRAMES DOWNED", world.drone_type.units - world.drone_units_left),
+                ("TURRET STATUS", "STANDING" if world.turret.alive_and_well else "DESTROYED"),
+                ("COINS EARNED", f"+{coins_gained}"),
+                ("XP EARNED", f"+{xp_gained}" + ("  LEVEL UP!" if leveled_up else "")),
+                ("CAREER TOTAL", self.profile["total_score"]),
+            ]
+
+        self.result_menu = ResultMenu(won, summary, self._leave_versus_match, self._leave_versus_match, self._return_to_menu)
         self.state = STATE_RESULT
 
     def _draw(self):

@@ -141,29 +141,32 @@ _MODE_DESCRIPTIONS = {
     "DRONE STRIKE": ["Fly a drone and destroy", "the city's marked targets."],
     "AIR DEFENSE": ["Man a PVO turret and defend", "civilian structures from", "incoming raiders."],
     "CIVILIAN SURVIVAL": ["No weapon -- reach shelter", "before a telegraphed strike", "lands. Survive the bombardment."],
+    "MULTIPLAYER": ["Drone vs. PVO, head to head", "over LAN or RadminVPN --", "one attacks, one defends."],
 }
 
 
 class ModeSelectMenu(Screen):
-    """Pick a side: attack (Drone Strike, the original mission), defend
-    (Air Defense, manning a PVO turret against incoming raiders), or
-    survive (Civilian Survival, on foot with no weapon)."""
+    """Pick a side: attack (Drone Strike, the original single-player
+    mission), defend (Air Defense, manning a PVO turret against incoming
+    raiders), survive (Civilian Survival, on foot with no weapon), or
+    Multiplayer -- a human Drone against a human PVO player, head to head."""
 
     title = "CHOOSE YOUR SIDE"
     dim_background = True
 
-    def __init__(self, on_drone_mode, on_defense_mode, on_survival_mode, on_back):
+    def __init__(self, on_drone_mode, on_defense_mode, on_survival_mode, on_multiplayer, on_back):
         super().__init__()
         cx = constants.WIDTH // 2
-        card_w, card_h = 250, 200
-        gap = 26
-        total_w = 3 * card_w + 2 * gap
-        start_x = cx - total_w // 2
+        card_w, card_h = 210, 200
+        gap = 20
         entries = [
             ("DRONE STRIKE", on_drone_mode, constants.ACCENT),
             ("AIR DEFENSE", on_defense_mode, constants.GOOD),
             ("CIVILIAN SURVIVAL", on_survival_mode, constants.WARN),
+            ("MULTIPLAYER", on_multiplayer, constants.DANGER),
         ]
+        total_w = len(entries) * card_w + (len(entries) - 1) * gap
+        start_x = cx - total_w // 2
         self.cards = [
             (pygame.Rect(start_x + i * (card_w + gap), 210, card_w, card_h), label, callback, color)
             for i, (label, callback, color) in enumerate(entries)
@@ -489,6 +492,130 @@ class DefenseSelectMenu(Screen):
         draw_wrapped_text(
             surface, desc, rect.x + 16, y + 6, rect.width - 32, constants.TEXT_DIM, max_bottom=rect.bottom - 10
         )
+
+
+class MultiplayerMenu(Screen):
+    """Host or join a LAN/RadminVPN match. Picking a role happens on the
+    next screen (host picks an airframe, joiner picks a PVO unit) -- this
+    one is just "which side of the connection are you"."""
+
+    title = "MULTIPLAYER"
+    dim_background = True
+
+    def __init__(self, on_host, on_join, on_back):
+        super().__init__()
+        cx = constants.WIDTH // 2
+        self.widgets = [
+            Button((cx - 140, 260, 280, 56), "HOST A MATCH", on_host, font_size=24),
+            Button((cx - 140, 330, 280, 56), "JOIN A MATCH", on_join, font_size=24),
+            Button((cx - 110, 420, 220, 48), "BACK", on_back, font_size=20),
+        ]
+
+    def draw(self, surface):
+        super().draw(surface)
+        lines = [
+            "Both players need to be reachable on the same network --",
+            "a real LAN, or a virtual one like RadminVPN (free, just",
+            "install it on both machines and use the IP it gives you).",
+        ]
+        y = 200
+        for line in lines:
+            surf = get_font(14).render(line, True, constants.TEXT_FAINT)
+            surface.blit(surf, surf.get_rect(center=(constants.WIDTH // 2, y)))
+            y += 20
+
+
+class HostWaitingMenu(Screen):
+    """Shown while hosting, before a client has connected. Polled every
+    frame by Game -- see _update's STATE_MP_HOSTING branch -- to check
+    whether a "join" packet has arrived yet."""
+
+    title = "HOSTING"
+    dim_background = True
+
+    def __init__(self, address_text, on_cancel):
+        super().__init__()
+        self.address_text = address_text
+        self.widgets = [Button((constants.WIDTH // 2 - 110, 420, 220, 48), "CANCEL", on_cancel, font_size=20)]
+
+    def draw(self, surface):
+        super().draw(surface)
+        cx = constants.WIDTH // 2
+        label = get_font(18).render("Tell the other player to Join using:", True, constants.TEXT_DIM)
+        surface.blit(label, label.get_rect(center=(cx, 260)))
+
+        addr_surf = get_font(34, bold=True, mono=True).render(self.address_text, True, constants.ACCENT)
+        surface.blit(addr_surf, addr_surf.get_rect(center=(cx, 310)))
+
+        waiting = get_font(16).render("Waiting for a connection...", True, constants.TEXT_FAINT)
+        surface.blit(waiting, waiting.get_rect(center=(cx, 360)))
+
+
+class JoinMultiplayerMenu(Screen):
+    """Type the host's address, pick a PVO unit, connect. Connection status
+    (attempting / failed) is driven externally by Game setting .status_text."""
+
+    title = "JOIN MATCH"
+    dim_background = True
+
+    def __init__(self, on_connect, on_back):
+        super().__init__()
+        self.on_connect = on_connect
+        self.status_text = ""
+        cx = constants.WIDTH // 2
+        self.address_field = TextInput((cx - 160, 190, 320, 44), placeholder="host IP or IP:port")
+        self.fields = [self.address_field]
+
+        self.selected_key = pvo.PVO_UNIT_TYPES[0].key
+        self.unit_buttons = []
+        bw = 200
+        for i, unit_type in enumerate(pvo.PVO_UNIT_TYPES):
+            rect = (cx - bw - 10 + i * (bw + 20), 254, bw, 46)
+            self.unit_buttons.append((Button(rect, unit_type.name, self._make_select(unit_type.key), font_size=17), unit_type.key))
+
+        self.widgets = [btn for btn, _key in self.unit_buttons] + [
+            Button((cx - 140, 330, 280, 54), "CONNECT", self._connect, font_size=24),
+            Button((cx - 110, 400, 220, 48), "BACK", on_back, font_size=20),
+        ]
+
+    def _make_select(self, key):
+        def select():
+            self.selected_key = key
+
+        return select
+
+    def _connect(self):
+        text = self.address_field.text.strip()
+        if not text:
+            self.status_text = "Enter the host's address first."
+            return
+        self.status_text = "Connecting..."
+        self.on_connect(text, self.selected_key)
+
+    def update(self, mouse_pos, dt):
+        for field in self.fields:
+            field.update(dt)
+        super().update(mouse_pos, dt)
+
+    def handle_event(self, event, mouse_pos):
+        for field in self.fields:
+            field.handle_event(event, mouse_pos)
+        return super().handle_event(event, mouse_pos)
+
+    def draw(self, surface):
+        super().draw(surface)
+        self.address_field.draw(surface)
+        for btn, key in self.unit_buttons:
+            btn.draw(surface)
+            if key == self.selected_key:
+                # Button's own hover-tint disappears once the mouse moves
+                # away, so "selected" needs its own always-visible marker,
+                # not just a recolored accent that only shows while hovering.
+                pygame.draw.rect(surface, constants.ACCENT, btn.rect, width=3, border_radius=10)
+        if self.status_text:
+            color = constants.DANGER if "fail" in self.status_text.lower() or "no" in self.status_text.lower() else constants.TEXT_DIM
+            surf = get_font(15).render(self.status_text, True, color)
+            surface.blit(surf, surf.get_rect(center=(constants.WIDTH // 2, 460)))
 
 
 class SettingsMenu(Screen):

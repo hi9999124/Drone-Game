@@ -248,22 +248,21 @@ verified via headless testing that both a "run to shelter" and a "don't
 react to warnings" scripted player can complete it, and that a forced
 direct hit both damages the player and can end the mission in a loss.
 
-**Stage 3 -- LAN direct-connect multiplayer.**
-The actual netcode foundation, and the biggest architectural change in the
-project so far:
-- **Authority.** `World` currently mutates state directly and trusts itself.
-  Networked play needs one authoritative simulation (whoever hosts) with
-  clients sending *inputs*, not positions -- otherwise any client can just
-  declare itself the winner.
-- **Serialization + tick sync.** Entity state has to become serialisable and
-  reconcilable, with interpolation for remote entities, or movement jitters.
-- **Transport.** Plain UDP sockets over LAN -- and this is exactly where
-  RadminVPN (or Hamachi, etc.) already fits with zero extra work: those
-  tools make remote players *appear* to be on the same LAN at the network
-  level, so "LAN play" and "play with a friend over RadminVPN" are the same
-  code path, not two separate integrations.
-- Host a match, one other player joins by IP:port, both see the same
-  authoritative simulation. No accounts, no server, proves the model.
+**Stage 3 -- LAN direct-connect multiplayer (done).**
+`src/net.py` (non-blocking UDP + JSON, zero dependencies) and
+`src/versus_world.py` (host-authoritative Drone vs. PVO simulation: the host
+runs the only real physics and streams state snapshots; the client only ever
+applies them, never simulates -- eliminates desync by construction rather
+than reconciling it). Fixed roles keep the UI simple: whoever hosts plays
+Drone Strike, whoever joins plays PVO Defense. Both sides build the identical
+static city from a shared seed, so only dynamic state crosses the wire.
+RadminVPN/Hamachi need no special integration at all -- they just make a
+remote IP look local, so "LAN play" and "play over RadminVPN" are the exact
+same Host/Join-by-address code path in `src/ui/menu.py`'s new multiplayer
+screens. Verified with two real separate OS processes exchanging real UDP
+packets over loopback (join/start handshake, streaming state snapshots,
+forfeit-on-leave), and with two real, fully wired `Game` instances completing
+a match end to end -- not just the in-process simulation logic.
 
 **Stage 4 -- Room server (public + private rooms).**
 Only once Stage 3's authority model works. A lobby server (most likely the

@@ -61,7 +61,8 @@ airframe.
 
 ## Game modes
 
-**PLAY** from the main menu leads to a side-select screen with three modes:
+**PLAY** from the main menu leads to a side-select screen with three
+single-player modes, plus **MULTIPLAYER** for head-to-head play:
 
 | Mode | You play | Objective |
 |---|---|---|
@@ -71,8 +72,28 @@ airframe.
 
 Each is a genuinely different way of playing, not a reskin: flying-and-attacking,
 aiming-and-shooting, and reading-the-map-and-reacting, respectively. See
-[`PROJECT_PLAN.md`](PROJECT_PLAN.md) for what's next (playable teams over
-LAN/RadminVPN multiplayer, then a room server).
+[`PROJECT_PLAN.md`](PROJECT_PLAN.md) for what's next (a public/private room
+server on top of the multiplayer foundation below).
+
+## Multiplayer (LAN / RadminVPN)
+
+**MULTIPLAYER** from the main menu pits one human Drone Strike pilot against
+one human PVO Defender, head to head, over a local network or a virtual-LAN
+tool like RadminVPN or Hamachi (no special setup needed for either — they
+just make a friend's PC look local, so it's the same "join by address" flow
+either way):
+
+- **Host a match**: pick your drone, then share the address shown (your LAN
+  IP and a port) with whoever you're playing with.
+- **Join a match**: pick your PVO unit, type the host's address, connect.
+- Whoever hosts always flies the drone; whoever joins always mans the PVO
+  defense — a fixed, simple pairing rather than a role-picker.
+- The host's machine runs the only real simulation and streams state to the
+  client every frame, so the two sides can never desync or disagree about
+  who won.
+- Drone wins by destroying every target (or the PVO turret); PVO wins by
+  shooting down every one of the drone's airframes. Leaving mid-match counts
+  as a forfeit for whoever left.
 
 ## Airframes
 
@@ -141,6 +162,8 @@ src/
   world.py             Drone Strike: city generation, collisions, mission rules, depth-sorted draw
   defense_world.py     Air Defense: waves of raiders, protected structures, mission rules
   survival_world.py    Civilian Survival: telegraphed strikes, shelters, mission rules
+  versus_world.py      Multiplayer: host-authoritative Drone vs. PVO simulation, snapshots
+  net.py               LAN/RadminVPN transport: non-blocking UDP + JSON, no dependencies
   camera.py            Follow camera, screen shake, world -> screen projection
   drones.py            Airframe definitions (stats + abilities)
   save_system.py       Atomic JSON save/load for profile + account + settings
@@ -160,7 +183,7 @@ src/
     civilian.py         Civilian Survival: player character (on-foot movement)
   ui/
     button.py           Hover-animated button + settings option row
-    menu.py             Main / drone select / settings / account / leaderboard / pause / result screens
+    menu.py             Main / drone select / settings / account / leaderboard / multiplayer / pause / result screens
     hud.py               Flight, ability and mission panels, off-screen target arrows
     touch_controls.py   Responsive on-screen pads (touch + mouse)
     text_input.py        Single-line text field (username/password entry)

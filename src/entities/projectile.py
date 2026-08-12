@@ -92,10 +92,15 @@ class Projectile:
                     continue
                 dist = (pygame.Vector2(entity.pos) - self.pos).length()
                 hit_radius = getattr(entity, "radius", 15.0) + 10.0
-                # A blast has some real vertical extent too, not a razor-thin
-                # plane -- generous enough to cover an unguided flak round
-                # fired near ground level reaching a low-flying raider.
-                if dist <= hit_radius and abs(entity.altitude - self.altitude) <= 70.0:
+                # Whether a weapon can threaten a target at a given altitude
+                # at all is PVOTurret.detect_ceiling's job (it won't even
+                # lock on, let alone fire, above that) -- this tolerance is
+                # just "did the shot actually reach the target's height",
+                # generous enough to cover the full realistic range (an
+                # unguided round fired near ground level vs. a drone
+                # spawning at 110 and climbing toward MAX_ALTITUDE=230)
+                # rather than a second, stricter gate duplicating that check.
+                if dist <= hit_radius and abs(entity.altitude - self.altitude) <= 180.0:
                     self.alive = False
                     return self._detonation()
 
