@@ -100,9 +100,13 @@ backend and puts you on the online leaderboard.
 
 The backend (Cloudflare Worker + D1) lives in [`backend/`](backend/) — see
 [`backend/README.md`](backend/README.md) for exact deploy steps (it's not
-live by default; `src/backend.py`'s `API_BASE` is a placeholder until you
-deploy it and fill that in). Every endpoint it exposes was tested against a
-real local database before being written up, not just designed on paper.
+live by default; the game points at a placeholder URL until you deploy one).
+Once deployed, point *any* copy of the game at it — including an already-
+downloaded `.exe`/APK, no rebuild needed — by editing
+`backend_config.json` next to your save file (`~/.dronepvo/` on desktop);
+the game creates this file with placeholder values the first time you run
+it. Every backend endpoint was tested against a real local database before
+being written up, not just designed on paper.
 
 ## Project structure
 

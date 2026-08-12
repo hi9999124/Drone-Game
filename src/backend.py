@@ -14,20 +14,61 @@ to paste in below once the Worker is deployed.
 """
 
 import json
+import os
 import threading
 import time
 import urllib.error
 import urllib.request
 import webbrowser
 
-# Fill these in after deploying backend/ -- see backend/README.md.
-API_BASE = "https://dronepvo-backend.YOUR-SUBDOMAIN.workers.dev"
-GITHUB_CLIENT_ID = "YOUR_GITHUB_CLIENT_ID"
+from . import save_system
+
+DEFAULT_API_BASE = "https://dronepvo-backend.YOUR-SUBDOMAIN.workers.dev"
+DEFAULT_GITHUB_CLIENT_ID = "YOUR_GITHUB_CLIENT_ID"
 
 GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 
 REQUEST_TIMEOUT = 10
+
+CONFIG_PATH = os.path.join(save_system.save_dir(), "backend_config.json")
+
+
+def _load_client_config():
+    """API_BASE/GITHUB_CLIENT_ID live in an editable JSON file next to the
+    save, not hardcoded Python constants -- a downloaded/built .exe has its
+    source baked in by PyInstaller at build time, so anyone who deploys
+    their own backend needs a way to point an already-built game at it
+    without rebuilding from source. Creates the file with placeholder
+    values on first run so there's something to find and edit."""
+    defaults = {"api_base": DEFAULT_API_BASE, "github_client_id": DEFAULT_GITHUB_CLIENT_ID}
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return {**defaults, **{k: v for k, v in loaded.items() if k in defaults}}
+    except (OSError, ValueError):
+        try:
+            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+            with open(CONFIG_PATH, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "_readme": (
+                            "Edit api_base to your deployed Cloudflare Worker URL "
+                            "(see backend/README.md), then restart the game."
+                        ),
+                        **defaults,
+                    },
+                    handle,
+                    indent=2,
+                )
+        except OSError:
+            pass  # Read-only filesystem, etc. -- defaults still work, just can't be edited here.
+        return defaults
+
+
+_config = _load_client_config()
+API_BASE = _config["api_base"]
+GITHUB_CLIENT_ID = _config["github_client_id"]
 
 
 class BackendError(Exception):

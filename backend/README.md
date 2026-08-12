@@ -208,16 +208,37 @@ this one has an extra step to store it in Cloudflare.
 
 ## Wire up the game client
 
-Open `src/backend.py` in the main game repo and set:
+**If you're running the game from source**, either works:
 
-```python
-API_BASE = "https://dronepvo-backend.<your-subdomain>.workers.dev"  # from step 3 above
-GITHUB_CLIENT_ID = "..."  # from the GitHub setup above
-```
+- Edit the config file below (same as the packaged-build instructions), or
+- Edit the defaults directly in `src/backend.py` (`DEFAULT_API_BASE`,
+  `DEFAULT_GITHUB_CLIENT_ID`).
 
-Google needs no client-side config -- the game only ever talks to your
-Worker for Google sign-in, never to Google directly, since the secret lives
-on the Worker.
+**If you're running a downloaded/built copy of the game** (the `.exe` /
+`DronePVO` binary from a Release, or an Android APK), editing the source
+does nothing -- PyInstaller/Buildozer bake it into the binary at build
+time, before you ever deployed a backend. Instead:
+
+1. Run the game once (even just to the main menu) so it creates its config
+   file, then quit.
+2. Open `backend_config.json`, found next to the save file:
+   - Windows/macOS/Linux: `~/.dronepvo/backend_config.json`
+   - Android: inside the app's private storage (same folder the save uses)
+3. Edit `api_base` to your Worker's URL (from step 3 above) and, if you set
+   up GitHub sign-in, `github_client_id` too. It looks like this:
+
+   ```json
+   {
+     "api_base": "https://dronepvo-backend.<your-subdomain>.workers.dev",
+     "github_client_id": "..."
+   }
+   ```
+4. Save the file and restart the game -- it reads this file once at
+   startup.
+
+Google needs no client-side config either way -- the game only ever talks
+to your Worker for Google sign-in, never to Google directly, since the
+secret lives on the Worker.
 
 ## API reference
 

@@ -33,7 +33,7 @@ DEFAULT_DATA = {
 }
 
 
-def _save_dir():
+def save_dir():
     # On Android the app can only write inside its private directory, which
     # python-for-android exposes via ANDROID_PRIVATE. Everywhere else a dotfolder
     # in the user's home is the conventional spot (and survives reinstalling).
@@ -43,7 +43,7 @@ def _save_dir():
     return os.path.join(os.path.expanduser("~"), ".dronepvo")
 
 
-SAVE_PATH = os.path.join(_save_dir(), "savegame.json")
+SAVE_PATH = os.path.join(save_dir(), "savegame.json")
 
 
 def _merge_defaults(loaded):
