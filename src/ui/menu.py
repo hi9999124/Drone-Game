@@ -143,8 +143,8 @@ class HowToMenu(Screen):
                 [
                     "KEY TACTIC -- buildings only block you BELOW their roof",
                     "(up to 200m). Climb above ~210m to cruise the city safely --",
-                    "ramming a TARGET still works at any altitude, so only dive",
-                    "back down for the final strike.",
+                    "hitting a TARGET (ram, bomb, or rocket) works at any",
+                    "altitude, so only dive back down for the final strike.",
                 ],
             ),
             (

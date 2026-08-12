@@ -46,6 +46,18 @@ class Projectile:
             return self._detonation()
 
         for building in buildings:
+            if building.destroyed:
+                continue
+            # A target counts as struck by footprint alone, same rule as a
+            # kamikaze ram -- otherwise a rocket fired from the cruising
+            # altitude the game itself recommends (above every building's
+            # roofline, including the target's) flies straight over its
+            # target forever and detonates nowhere, since blocks_at() is
+            # altitude-gated and nothing about a flat, fast rocket ever
+            # brings it back down into that range on its own.
+            if building.is_target and building.contains_point(self.pos.x, self.pos.y):
+                self.alive = False
+                return self._detonation()
             if building.blocks_at(self.pos.x, self.pos.y, self.altitude):
                 self.alive = False
                 return self._detonation()

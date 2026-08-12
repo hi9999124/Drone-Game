@@ -74,7 +74,12 @@ DRONE_TYPES = [
         drag=0.55,
         max_speed=290.0,
         climb_speed=110.0,
-        ammo=8,
+        # A target has 260 hp and a direct hit deals 170, so even flawless
+        # play (every bomb a dead-center hit, zero misses) needs 10 bombs
+        # for 5 targets -- 8 was mathematically short regardless of skill.
+        # 12 leaves a couple spare for the near-misses that are inevitable
+        # given a bomb's gravity-drop aiming is inherently imprecise.
+        ammo=12,
         blast_radius=145.0,
         blast_damage=170.0,
         ability_name="Drop Bomb",
