@@ -417,27 +417,38 @@ class AccountMenu(Screen):
     def busy(self):
         return self.pending is not None or (self.device_state is not None and self.device_state.status != "error")
 
+    def _guard_unconfigured(self):
+        """True (and sets a clear error) if there's no point even trying --
+        the placeholder API_BASE domain isn't anyone's real deployment, and
+        depending on network/DNS setup, requesting it can come back as
+        something confusing (e.g. a bare "Not Found") instead of a clean
+        connection failure. Better to never fire the request at all."""
+        if backend.is_configured():
+            return False
+        self.error = "No backend deployed yet -- see backend/README.md."
+        return True
+
     def _start_login(self):
-        if self.busy:
+        if self.busy or self._guard_unconfigured():
             return
         self.error = ""
         self.pending = backend.run_async(backend.login, self.username_field.text, self.password_field.text)
 
     def _start_signup(self):
-        if self.busy:
+        if self.busy or self._guard_unconfigured():
             return
         self.error = ""
         self.pending = backend.run_async(backend.signup, self.username_field.text, self.password_field.text)
 
     def _start_github(self):
-        if self.busy:
+        if self.busy or self._guard_unconfigured():
             return
         self.error = ""
         self.device_state = backend.DeviceLoginState()
         backend.start_github_login(self.device_state)
 
     def _start_google(self):
-        if self.busy:
+        if self.busy or self._guard_unconfigured():
             return
         self.error = ""
         self.device_state = backend.DeviceLoginState()
