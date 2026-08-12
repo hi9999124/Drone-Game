@@ -132,7 +132,18 @@ DRONE_TYPES = [
         drag=0.8,
         max_speed=470.0,
         climb_speed=130.0,
-        ammo=14,
+        # A target has 260 hp; a dead-center hit deals the full 95, so even
+        # flawless play needs 3 rockets/target -- 15 for all 5 -- and this
+        # airframe has no ram fallback and only 1 unit (no second airframe),
+        # so running dry mid-mission was a hard dead end, not just a rough
+        # patch: the small self-damaging splash from simply crashing into a
+        # building (see world.py's _crash) is nowhere near enough to finish
+        # a target off, and two crashes destroys the drone itself (4 max_hp,
+        # 2 dmg/crash). 14 was actually below the flawless-play minimum.
+        # 20 leaves real margin for the falloff-damaged near-misses that are
+        # inevitable while dodging fire mid-engagement, same logic as Baba
+        # Yaga's ammo count above.
+        ammo=20,
         blast_radius=75.0,
         blast_damage=95.0,
         ability_name="Fire Rocket",

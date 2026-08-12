@@ -271,7 +271,13 @@ class HUD:
             pygame.draw.polygon(surface, constants.WARN, [tip, left, right])
 
     def _draw_survivor_panel(self, surface, player, world):
-        rect = pygame.Rect(18, 18, 250, 96)
+        # Was 96px tall with status and the control hint crammed onto the
+        # same row (status left-aligned, hint right-aligned) -- "IN SHELTER"
+        # alone is wide enough at this font size to run into the hint's
+        # left edge, rendering as "IN SHELTERWASD / arrows to move" with no
+        # gap at all. Stacked on their own rows instead, same spacing
+        # convention as _draw_flight_panel's rows.
+        rect = pygame.Rect(18, 18, 250, 118)
         self._panel(surface, rect)
 
         title = get_font(16, bold=True).render("SURVIVAL", True, constants.ACCENT)
@@ -292,7 +298,7 @@ class HUD:
         surface.blit(status_surf, (rect.x + 14, rect.y + 68))
 
         hint = get_font(12, mono=True).render("WASD / arrows to move", True, constants.TEXT_FAINT)
-        surface.blit(hint, (rect.right - hint.get_width() - 14, rect.y + 70))
+        surface.blit(hint, (rect.x + 14, rect.y + 92))
 
     def _draw_survival_mission_panel(self, surface, world):
         rect = pygame.Rect(constants.WIDTH - 268, 18, 250, 96)
