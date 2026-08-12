@@ -7,9 +7,11 @@ from .entities.building import Building
 from .entities.enemy import DIFFICULTY_PROFILES, EnemyDrone
 from .entities.player import PlayerDrone
 from .entities.projectile import Explosion, Projectile
+from .entities.pvo import PVO_UNIT_TYPES, PVOTurret
 
 SCORE_TARGET = 250
 SCORE_ENEMY = 75
+SCORE_PVO = 150
 
 RESULT_PLAYING = "playing"
 RESULT_WON = "won"
@@ -27,12 +29,14 @@ class World:
 
         self.buildings = []
         self.enemies = []
+        self.pvo_units = []
         self.projectiles = []
         self.explosions = []
 
         self.score = 0
         self.targets_destroyed = 0
         self.enemies_destroyed = 0
+        self.pvo_destroyed = 0
         self.units_left = drone_type.units
         self.result = RESULT_PLAYING
         self.respawn_timer = 0.0
@@ -42,6 +46,8 @@ class World:
 
         self._generate_city()
         self._spawn_enemies()
+        self._spawn_pvo_defenses()
+        self.pvo_total = len(self.pvo_units)
         self.player = self._spawn_player()
 
     # ------------------------------------------------------------------ setup
@@ -75,6 +81,30 @@ class World:
             x = self.rng.uniform(-half, half)
             y = self.rng.uniform(-half, half)
             self.enemies.append(EnemyDrone(x, y, self.profile))
+
+    # How many ground-based air-defence units guard the city's targets, and
+    # whether long-range SAM sites are in the mix yet or it's flak guns only
+    # -- escalates the same way enemy interceptor count/aggression does.
+    PVO_COUNTS = {"Easy": 1, "Normal": 2, "Hard": 3, "Insane": 4}
+
+    def _spawn_pvo_defenses(self):
+        count = self.PVO_COUNTS.get(self.difficulty, 2)
+        targets = self.targets
+        if not targets:
+            return
+        sam_allowed = self.difficulty in ("Hard", "Insane")
+        gun_type = next(u for u in PVO_UNIT_TYPES if u.key == "aagun")
+        sam_type = next(u for u in PVO_UNIT_TYPES if u.key == "sam")
+
+        for _ in range(count):
+            target = self.rng.choice(targets)
+            unit_type = self.rng.choice([gun_type, sam_type]) if sam_allowed else gun_type
+            for _ in range(20):
+                offset = pygame.Vector2(self.rng.uniform(160, 320), 0).rotate(self.rng.uniform(0, 360))
+                pos = target.center + offset
+                if not any(b.contains_point(pos.x, pos.y) for b in self.buildings):
+                    self.pvo_units.append(PVOTurret(pos.x, pos.y, unit_type))
+                    break
 
     def _find_clear_spawn(self):
         """Spawn on the map edge, never inside a building."""
@@ -116,6 +146,7 @@ class World:
 
         self._update_player(dt, controls)
         self._update_enemies(dt)
+        self._update_pvo(dt)
         self._update_projectiles(dt)
         self._update_effects(dt)
         self._check_mission_state(dt)
@@ -266,6 +297,27 @@ class World:
                 )
         self.enemies = [e for e in self.enemies if e.alive]
 
+    def _update_pvo(self, dt):
+        for turret in self.pvo_units:
+            if not turret.alive:
+                continue
+            shot = turret.update(dt, self.player)
+            if shot:
+                self.projectiles.append(
+                    Projectile(
+                        "missile" if shot["homing"] else "rocket",
+                        shot["pos"],
+                        shot["altitude"],
+                        shot["velocity"],
+                        shot["blast_radius"],
+                        shot["damage"],
+                        friendly=False,
+                        target=self.player if shot["homing"] else None,
+                        turn_rate=shot["turn_rate"],
+                    )
+                )
+        self.pvo_units = [u for u in self.pvo_units if u.alive]
+
     def _update_projectiles(self, dt):
         for projectile in list(self.projectiles):
             blast = projectile.update(dt, self.buildings)
@@ -313,6 +365,20 @@ class World:
                     self.enemies_destroyed += 1
                     self.score += SCORE_ENEMY
 
+        if friendly:
+            for turret in self.pvo_units:
+                if not turret.alive:
+                    continue
+                dist = pygame.Vector2(turret.pos.x - pos.x, turret.pos.y - pos.y).length()
+                if dist <= radius:
+                    # Sturdier than a basic interceptor (40-70 hp vs. 2) but
+                    # still droppable in one or two solid hits -- a real
+                    # secondary objective, not a bullet sponge.
+                    if turret.take_damage(damage * 0.6):
+                        self.pvo_destroyed += 1
+                        self.score += SCORE_PVO
+                        self.notify("Air defense destroyed")
+
         player = self.player
         if player is not None and player.alive_and_well:
             dist = pygame.Vector2(player.pos.x - pos.x, player.pos.y - pos.y).length()
@@ -349,6 +415,9 @@ class World:
         for enemy in self.enemies:
             if camera.is_visible(enemy.pos.x, enemy.pos.y):
                 drawables.append((enemy.pos.y, enemy))
+        for turret in self.pvo_units:
+            if turret.alive and camera.is_visible(turret.pos.x, turret.pos.y):
+                drawables.append((turret.pos.y, turret))
         for projectile in self.projectiles:
             drawables.append((projectile.pos.y, projectile))
         if self.player is not None and self.player.alive:

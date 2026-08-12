@@ -1,20 +1,38 @@
+import math
+
 import pygame
 
 from .. import constants
+from ..utils import clamp
 from .base import draw_shadow
 
 GRAVITY = 260.0
 
 
 class Projectile:
-    """Bombs and rockets share one class; `kind` picks the flight model.
+    """Bombs, rockets and guided missiles share one class; `kind` picks the
+    flight model.
 
-    bomb   - inherits the launching drone's horizontal velocity and falls under
-             gravity, so bombing runs need altitude and lead
-    rocket - flies flat and fast along the launch heading
+    bomb    - inherits the launching drone's horizontal velocity and falls
+              under gravity, so bombing runs need altitude and lead
+    rocket  - flies flat and fast along the launch heading, unguided
+    missile - like a rocket, but steers toward `target` every frame at
+              `turn_rate` degrees/second (a PVO SAM site's weapon) -- outrun
+              or outturn it rather than out-dodge it
     """
 
-    def __init__(self, kind, pos, altitude, velocity, blast_radius, blast_damage, friendly=True):
+    def __init__(
+        self,
+        kind,
+        pos,
+        altitude,
+        velocity,
+        blast_radius,
+        blast_damage,
+        friendly=True,
+        target=None,
+        turn_rate=0.0,
+    ):
         self.kind = kind
         self.pos = pygame.Vector2(pos)
         self.altitude = float(altitude)
@@ -23,8 +41,13 @@ class Projectile:
         self.blast_radius = blast_radius
         self.blast_damage = blast_damage
         self.friendly = friendly
+        self.target = target
+        self.turn_rate = turn_rate
         self.alive = True
         self.life = 6.0
+
+    def _homing_target_alive(self):
+        return self.target is not None and getattr(self.target, "alive_and_well", False)
 
     def update(self, dt, buildings):
         if not self.alive:
@@ -37,6 +60,17 @@ class Projectile:
 
         if self.kind == "bomb":
             self.vertical_speed -= GRAVITY * dt
+        elif self.kind == "missile" and self.turn_rate > 0.0 and self._homing_target_alive():
+            to_target = pygame.Vector2(self.target.pos) - self.pos
+            if to_target.length_squared() > 1e-4:
+                current_angle = math.degrees(math.atan2(self.vel.y, self.vel.x))
+                desired_angle = math.degrees(math.atan2(to_target.y, to_target.x))
+                delta = (desired_angle - current_angle + 180.0) % 360.0 - 180.0
+                max_turn = self.turn_rate * dt
+                turn = clamp(delta, -max_turn, max_turn)
+                speed = self.vel.length()
+                self.vel = pygame.Vector2(1, 0).rotate(current_angle + turn) * speed
+            self.vertical_speed = clamp((self.target.altitude - self.altitude) * 2.0, -220.0, 220.0)
         self.altitude += self.vertical_speed * dt
         self.pos += self.vel * dt
 

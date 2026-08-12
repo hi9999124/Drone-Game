@@ -79,6 +79,13 @@ edge of the screen. Difficulty (Easy → Insane) changes interceptor count,
 speed, reaction time, and whether they shoot back — same AI throughout, just
 sharper numbers.
 
+Targets are also guarded by ground-based **PVO air defense** — a ZU-23 flak
+gun (rapid unguided fire, low-altitude only) and, from Hard difficulty up, a
+Buk-style SAM site (long range, any altitude, fires a guided missile once
+it's held a lock — watch the on-screen lock warning, you have that whole
+window to break line of sight or outrun it). Destroying one is a bonus
+objective (extra score), not required to win the mission.
+
 ## Saving
 
 Progress and settings save automatically to `~/.dronepvo/savegame.json` (the
@@ -129,7 +136,8 @@ src/
     player.py           Player drone, ability handling
     enemy.py            Interceptor AI + difficulty profiles
     building.py         Apartment blocks: extruded 2.5D draw, damage
-    projectile.py       Bombs, rockets, explosions
+    projectile.py       Bombs, rockets, guided missiles, explosions
+    pvo.py              Ground-based air defense: flak gun + SAM site AI
   ui/
     button.py           Hover-animated button + settings option row
     menu.py             Main / drone select / settings / account / leaderboard / pause / result screens

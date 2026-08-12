@@ -13,6 +13,7 @@ class HUD:
             self._draw_ability(surface, player)
         self._draw_mission_panel(surface, world)
         self._draw_compass(surface, world, camera)
+        self._draw_pvo_lock(surface, world)
         if show_fps:
             text = get_font(15, mono=True).render(f"{fps:.0f} FPS", True, constants.TEXT_FAINT)
             surface.blit(text, (constants.WIDTH - text.get_width() - 14, 12))
@@ -90,7 +91,7 @@ class HUD:
         surface.blit(key_hint, (rect.x + 14, rect.y + 55))
 
     def _draw_mission_panel(self, surface, world):
-        rect = pygame.Rect(constants.WIDTH - 268, 18, 250, 96)
+        rect = pygame.Rect(constants.WIDTH - 268, 18, 250, 116)
         self._panel(surface, rect)
 
         title = get_font(15, bold=True).render("MISSION", True, constants.TEXT_DIM)
@@ -110,6 +111,12 @@ class HUD:
             f"units {world.units_left}   hostiles {len(world.enemies)}", True, constants.TEXT_FAINT
         )
         surface.blit(units, (rect.x + 14, rect.y + 76))
+
+        if world.pvo_total:
+            pvo = get_font(13, mono=True).render(
+                f"air defense {world.pvo_destroyed}/{world.pvo_total}", True, constants.TEXT_FAINT
+            )
+            surface.blit(pvo, (rect.x + 14, rect.y + 96))
 
     def _draw_compass(self, surface, world, camera):
         """Edge arrows pointing at surviving targets that are off-screen."""
@@ -132,6 +139,32 @@ class HUD:
             left = edge - direction * 6 + perpendicular * 7
             right = edge - direction * 6 - perpendicular * 7
             pygame.draw.polygon(surface, constants.DANGER, [tip, left, right])
+
+    def _draw_pvo_lock(self, surface, world):
+        """Fair warning before a SAM/flak site can actually fire -- the lock
+        bar is the player's real window to break line of sight, leave
+        detection range, or just outrun it before `lock_time` runs out."""
+        from ..entities.pvo import STATE_LOCKED, STATE_TRACKING
+
+        active = [t for t in world.pvo_units if t.alive and t.state in (STATE_TRACKING, STATE_LOCKED)]
+        if not active:
+            return
+        turret = max(active, key=lambda t: t.lock_progress)
+        locked = turret.state == STATE_LOCKED
+        color = constants.DANGER if locked else constants.WARN
+        label = f"{turret.type.name.upper()} {'LOCK' if locked else 'TRACKING'}"
+
+        text = get_font(20, bold=True, mono=True).render(label, True, color)
+        rect = text.get_rect(center=(constants.WIDTH // 2, 100))
+        surface.blit(text, rect)
+
+        bar_w, bar_h = 220, 8
+        bar_x = constants.WIDTH // 2 - bar_w // 2
+        bar_y = rect.bottom + 8
+        pygame.draw.rect(surface, (40, 20, 24), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
+        fill_w = int(bar_w * clamp(turret.lock_progress, 0.0, 1.0))
+        if fill_w > 0:
+            pygame.draw.rect(surface, color, (bar_x, bar_y, fill_w, bar_h), border_radius=4)
 
     def _draw_message(self, surface, message):
         text = get_font(26, bold=True).render(message, True, constants.WARN)

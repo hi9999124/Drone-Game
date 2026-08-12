@@ -477,6 +477,7 @@ class Game:
             ("SCORE", world.score),
             ("TARGETS DESTROYED", f"{world.targets_destroyed}/{len(world.targets)}"),
             ("HOSTILES DOWNED", world.enemies_destroyed),
+            ("AIR DEFENSE DESTROYED", f"{world.pvo_destroyed}/{world.pvo_total}"),
             ("AIRFRAMES LEFT", world.units_left),
             ("COINS EARNED", f"+{coins_gained}"),
             ("XP EARNED", f"+{xp_gained}" + ("  LEVEL UP!" if leveled_up else "")),

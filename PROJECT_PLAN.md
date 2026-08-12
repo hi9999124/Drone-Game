@@ -49,8 +49,15 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
       distinct from the accounts/leaderboard work above, which is
       turn-based (submit a score, read a leaderboard), not live netcode.
       See "Multiplayer" below for what real-time play actually costs
-- [ ] Ground-based PVO/SAM turrets as a third entity type (the original
-      "play the air-defence side" idea)
+- [x] **Ground-based PVO air defense**: two unit types (`src/entities/pvo.py`)
+      guarding mission targets -- ZU-23 flak (short range, low-altitude
+      only, rapid unguided fire) and a Buk-style SAM site (long range, any
+      altitude, guided homing missile after a visible lock-on window). AI-
+      controlled hazard in the existing single-player mission for now; the
+      same `PVOTurret`/`PVOUnitType` system is the foundation the *playable*
+      PVO Defenders faction (see "Teams & multiplayer" below) builds on.
+- [ ] **Civilians (survival) team** and a **playable PVO Defenders team** —
+      see "Teams & multiplayer" below
 - [ ] Audio (engine loop, explosions) — no sound at all right now
 
 ## Fixed bugs (worth knowing if you touch this code again)
@@ -198,40 +205,67 @@ deploy runbook (D1 database creation, GitHub/Google OAuth app registration,
   match both providers' documented device-flow specs precisely, but this is
   the one piece worth testing by hand after deploying.
 
-## Multiplayer (real-time PvP, not started)
+## Teams & multiplayer (the full vision, staged)
 
-Offline vs. AI is done, including difficulty tiers, and there's now an
-optional online *leaderboard* (see "Accounts & backend" above) -- but that's
-fundamentally different from live multiplayer: submitting a final score after
-a match is a simple request/response, while two players seeing each other
-move in real time is a standing connection with an authoritative simulation.
-It's worth being clear about that gap before starting on it, since it isn't a
-small feature so much as a change to how the whole game is structured.
-Roughly what it involves:
+The goal: three playable sides -- **Drones** (existing), **PVO Defenders**
+(ground-based air defense, `src/entities/pvo.py`), and **Civilians**
+(survive/protect the population under attack) -- playable against each other
+over LAN, RadminVPN, or a real room server with public/private lobbies. This
+is genuinely several separate large pieces of work, not one feature, and
+they have a real dependency order: you can't network a faction that doesn't
+exist yet, and you can't build rooms/matchmaking on top of a simulation that
+isn't authoritative. Building it out of order means rewriting whatever came
+first.
 
-- **Authority.** Right now `World` mutates state directly and trusts itself.
-  Networked play needs one authoritative simulation (host or dedicated server)
-  with clients sending *inputs* rather than positions, or every player can
-  simply declare they won.
-- **Serialization + tick sync.** Entity state has to become something
-  serialisable and reconcilable, with interpolation for remote entities, or
-  everything jitters.
-- **Transport.** Python has no batteries-included game netcode. LAN is
-  tractable with raw UDP sockets; internet play needs either port forwarding
-  (bad UX) or a relay server (a hosting cost, which the $0 constraint rules
-  out — unless a free tier like Cloudflare Workers can be made to fit, which
-  is worth investigating before committing).
+**Stage 1 -- PVO Defenders content (in progress).**
+`PVOTurret`/`PVOUnitType` (flak + SAM, radar detection, lock-on warning,
+homing missiles) exist now as AI hazards in the single-player Drone mission.
+Next: more unit types (radar station buffing nearby SAM range, a mobile
+short-range SAM), and a **player-controlled Air Defense mission mode** --
+you play a PVO operator defending the city against AI drone waves, using the
+exact same `PVOTurret` mechanics. This proves the faction is fun and
+balanced *before* any networking touches it, and is what a networked human
+PVO player will actually be controlling later.
 
-A sensible order: **LAN two-player first** (no relay, no accounts, proves the
-authority model), and only then look at internet play. Trying to do rooms,
-accounts and matchmaking before the simulation is authoritative would mean
-rewriting all of it.
+**Stage 2 -- Civilians (survival) mode.**
+A new mission type, playable solo or (later) alongside a Drone or PVO
+player: protect civilian population zones (inverts the current "destroy
+targets" objective into "keep these standing") with some kind of
+survivability meter instead of a target-destroyed counter. Needs its own
+win/lose rules in `World`, not just a reskin of the current mission.
+
+**Stage 3 -- LAN direct-connect multiplayer.**
+The actual netcode foundation, and the biggest architectural change in the
+project so far:
+- **Authority.** `World` currently mutates state directly and trusts itself.
+  Networked play needs one authoritative simulation (whoever hosts) with
+  clients sending *inputs*, not positions -- otherwise any client can just
+  declare itself the winner.
+- **Serialization + tick sync.** Entity state has to become serialisable and
+  reconcilable, with interpolation for remote entities, or movement jitters.
+- **Transport.** Plain UDP sockets over LAN -- and this is exactly where
+  RadminVPN (or Hamachi, etc.) already fits with zero extra work: those
+  tools make remote players *appear* to be on the same LAN at the network
+  level, so "LAN play" and "play with a friend over RadminVPN" are the same
+  code path, not two separate integrations.
+- Host a match, one other player joins by IP:port, both see the same
+  authoritative simulation. No accounts, no server, proves the model.
+
+**Stage 4 -- Room server (public + private rooms).**
+Only once Stage 3's authority model works. A lobby server (most likely the
+existing Cloudflare Worker extended with WebSockets/Durable Objects, keeping
+the $0-budget constraint) that does presence + room codes + a public server
+browser; private rooms are the same rooms with a password/invite check.
+Under the hood, a room still ultimately brokers the same host/client
+connection Stage 3 already proved -- this stage is about *finding* a match,
+not re-inventing how a match runs.
+
+Building 3 and 4 before 1 and 2 exist would mean networking two factions
+that don't have gameplay yet, and rewriting the connection model once rooms
+need to broker something more complex than "one host, one client."
 
 ## Other next steps
 
-- **Ground PVO/SAM turrets** — the original "play the air-defence side" idea.
-  The `Aircraft` base and the shared detonate/damage path in `World` already
-  give this most of what it needs.
 - **Audio** — engine loop, explosions, target-destroyed sting. Free CC0 sources
   are listed in the tech-stack notes; nothing here costs money.
 - **More airframes** — `src/drones.py` is a plain table; adding one is a single
