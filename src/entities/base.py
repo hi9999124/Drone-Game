@@ -48,7 +48,15 @@ class Aircraft:
             self.vel += self.forward * accel * dt
 
         # Exponential drag so deceleration is frame-rate independent.
-        self.vel *= math.pow(max(0.0, 1.0 - drag), dt)
+        # `drag` is meant to stay below 1.0 ("fraction of speed shed per
+        # second"), but a misconfigured drone (drag >= 1.0) must not zero out
+        # velocity entirely: max(0.0, 1.0 - drag) ** dt evaluates to exactly
+        # 0.0 for any dt > 0 once drag >= 1.0, silently erasing all thrust
+        # every frame. Clamping the retained fraction to a tiny nonzero floor
+        # turns "drone physically cannot move" into "drone barely coasts",
+        # which is recoverable/obviously-a-bug-looking instead of invisible.
+        retained = max(1e-3, 1.0 - min(drag, 0.98))
+        self.vel *= math.pow(retained, dt)
         if self.vel.length() > max_speed:
             self.vel.scale_to_length(max_speed)
         self.pos += self.vel * dt
