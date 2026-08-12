@@ -9,6 +9,7 @@ from .ui.hud import HUD
 from .ui.menu import (
     AccountMenu,
     DroneSelectMenu,
+    HowToMenu,
     LeaderboardMenu,
     MainMenu,
     PauseMenu,
@@ -22,6 +23,7 @@ STATE_DRONE_SELECT = "drone_select"
 STATE_SETTINGS = "settings"
 STATE_ACCOUNT = "account"
 STATE_LEADERBOARD = "leaderboard"
+STATE_HOWTO = "howto"
 STATE_PLAYING = "playing"
 STATE_PAUSED = "paused"
 STATE_RESULT = "result"
@@ -72,15 +74,18 @@ class Game:
             self.profile,
             self.account,
             self._open_drone_select,
+            self._open_howto,
             self._open_account,
             self._open_leaderboard,
             self._open_settings,
             self._quit,
         )
+        self.howto_menu = HowToMenu(self._close_howto)
         self.pause_menu = PauseMenu(
             self._resume,
             self._open_drone_select,
             self._open_settings,
+            self._open_howto,
             self._return_to_menu,
             self._quit,
         )
@@ -115,6 +120,13 @@ class Game:
 
     def _close_drone_select(self):
         # Back out to wherever we came from: the main menu, or a paused mission.
+        self.state = STATE_PAUSED if self.previous_state == STATE_PAUSED else STATE_MENU
+
+    def _open_howto(self):
+        self.previous_state = self.state
+        self.state = STATE_HOWTO
+
+    def _close_howto(self):
         self.state = STATE_PAUSED if self.previous_state == STATE_PAUSED else STATE_MENU
 
     def _open_settings(self):
@@ -246,6 +258,10 @@ class Game:
         self._autosave()
 
         self.world = world_module.World(drone_type, self.settings.get("difficulty", "Normal"))
+        # The single highest-impact thing a new player doesn't know: flying
+        # at spawn altitude clips buildings up to 200m tall constantly.
+        # Repeated in the moment it matters, not just buried in HOW TO PLAY.
+        self.world.notify("Climb above 200m to fly over buildings safely", duration=5.0)
         self.camera.enable_shake = self.settings.get("screen_shake", True)
         self.camera.snap_to(self.world.player.pos)
         self._tracked_player = self.world.player
@@ -319,6 +335,8 @@ class Game:
             return self.account_menu
         if self.state == STATE_LEADERBOARD:
             return self.leaderboard_menu
+        if self.state == STATE_HOWTO:
+            return self.howto_menu
         if self.state == STATE_PAUSED:
             return self.pause_menu
         if self.state == STATE_RESULT:
@@ -373,6 +391,8 @@ class Game:
             self._close_account()
         elif self.state == STATE_LEADERBOARD:
             self._close_leaderboard()
+        elif self.state == STATE_HOWTO:
+            self._close_howto()
 
     def _gather_controls(self):
         keys = pygame.key.get_pressed()

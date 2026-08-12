@@ -51,17 +51,18 @@ class Screen:
 
 
 class MainMenu(Screen):
-    def __init__(self, profile, account, on_play, on_account, on_leaderboard, on_settings, on_quit):
+    def __init__(self, profile, account, on_play, on_howto, on_account, on_leaderboard, on_settings, on_quit):
         super().__init__()
         self.profile = profile
         self.account = account
         cx = constants.WIDTH // 2
         self.widgets = [
-            Button((cx - 130, 280, 260, 56), "PLAY", on_play, font_size=26),
-            Button((cx - 130, 348, 260, 48), "ACCOUNT", on_account),
-            Button((cx - 130, 404, 260, 48), "LEADERBOARD", on_leaderboard),
-            Button((cx - 130, 460, 260, 48), "SETTINGS", on_settings),
-            Button((cx - 130, 516, 260, 48), "QUIT", on_quit),
+            Button((cx - 130, 272, 260, 54), "PLAY", on_play, font_size=25),
+            Button((cx - 130, 334, 260, 42), "HOW TO PLAY", on_howto, font_size=18),
+            Button((cx - 130, 384, 260, 42), "ACCOUNT", on_account, font_size=18),
+            Button((cx - 130, 434, 260, 42), "LEADERBOARD", on_leaderboard, font_size=18),
+            Button((cx - 130, 484, 260, 42), "SETTINGS", on_settings, font_size=18),
+            Button((cx - 130, 534, 260, 42), "QUIT", on_quit, font_size=18),
         ]
 
     def draw(self, surface):
@@ -69,12 +70,12 @@ class MainMenu(Screen):
 
         title_font = get_font(66, bold=True)
         title = title_font.render("DRONE / PVO", True, constants.ACCENT)
-        surface.blit(title, title.get_rect(center=(constants.WIDTH // 2, 150)))
+        surface.blit(title, title.get_rect(center=(constants.WIDTH // 2, 130)))
 
         sub = get_font(20).render(
             "Urban strike operations", True, constants.TEXT_DIM
         )
-        surface.blit(sub, sub.get_rect(center=(constants.WIDTH // 2, 200)))
+        surface.blit(sub, sub.get_rect(center=(constants.WIDTH // 2, 178)))
 
         for widget in self.widgets:
             widget.draw(surface)
@@ -83,7 +84,7 @@ class MainMenu(Screen):
         who = self.account.get("username") or "Guest (not signed in)"
         identity = f"{who}    LV {self.profile['level']} {rank}    {self.profile['coins']} COINS"
         identity_surf = get_font(16, mono=True).render(identity, True, constants.ACCENT)
-        surface.blit(identity_surf, identity_surf.get_rect(center=(constants.WIDTH // 2, 592)))
+        surface.blit(identity_surf, identity_surf.get_rect(center=(constants.WIDTH // 2, 596)))
 
         stats = (
             f"BEST {self.profile['best_score']}    "
@@ -91,7 +92,7 @@ class MainMenu(Screen):
             f"CAREER {self.profile['total_score']}"
         )
         stats_surf = get_font(15, mono=True).render(stats, True, constants.TEXT_FAINT)
-        surface.blit(stats_surf, stats_surf.get_rect(center=(constants.WIDTH // 2, 616)))
+        surface.blit(stats_surf, stats_surf.get_rect(center=(constants.WIDTH // 2, 620)))
 
         hint = get_font(15, mono=True).render(
             "W/S thrust  -  A/D turn  -  SPACE/SHIFT altitude  -  F fire  -  ESC pause",
@@ -99,6 +100,68 @@ class MainMenu(Screen):
             constants.TEXT_FAINT,
         )
         surface.blit(hint, hint.get_rect(center=(constants.WIDTH // 2, constants.HEIGHT - 30)))
+
+
+class HowToMenu(Screen):
+    """Static reference screen. Exists because the single highest-impact
+    thing a new player doesn't know is that buildings only block you below
+    their roofline (up to 200m) -- climbing above that isn't a nice-to-have,
+    it's the difference between a clean run and losing every airframe to
+    the skyline before ever reaching a target."""
+
+    title = "HOW TO PLAY"
+    dim_background = True
+
+    def __init__(self, on_back):
+        super().__init__()
+        cx = constants.WIDTH // 2
+        self.widgets = [Button((cx - 110, constants.HEIGHT - 62, 220, 48), "BACK", on_back, font_size=20)]
+
+    def draw(self, surface):
+        super().draw(surface)
+        cx = constants.WIDTH // 2
+        y = 148
+        sections = [
+            (
+                None,
+                [
+                    "W/S or Up/Down -- thrust forward / reverse & brake",
+                    "A/D or Left/Right -- turn      SPACE/E climb, SHIFT/Q descend",
+                    "F or left click -- use airframe ability      ESC -- pause",
+                ],
+            ),
+            (
+                None,
+                [
+                    "Destroy every marked target (red roof, crosshair) before",
+                    "running out of airframes. Off-screen targets are marked",
+                    "by arrows at the edge of the screen.",
+                ],
+            ),
+            (
+                constants.WARN,
+                [
+                    "KEY TACTIC -- buildings only block you BELOW their roof",
+                    "(up to 200m). Climb above ~210m to cruise the city safely --",
+                    "ramming a TARGET still works at any altitude, so only dive",
+                    "back down for the final strike.",
+                ],
+            ),
+            (
+                constants.DANGER,
+                [
+                    "Ram airframes (FPV Kamikaze, Shahed-256) lose an airframe",
+                    "on ANY crash -- a building, an interceptor, even a miss --",
+                    "not just a target hit. Fly clean, not just fast.",
+                ],
+            ),
+        ]
+        for color, lines in sections:
+            for line in lines:
+                surf = get_font(16, mono=True).render(line, True, color or constants.TEXT_COLOR)
+                surface.blit(surf, surf.get_rect(center=(cx, y)))
+                y += 24
+            y += 16
 
 
 class DroneSelectMenu(Screen):
@@ -345,7 +408,7 @@ class PauseMenu(Screen):
     title = "PAUSED"
     dim_background = True
 
-    def __init__(self, on_resume, on_change_drone, on_settings, on_main_menu, on_quit):
+    def __init__(self, on_resume, on_change_drone, on_settings, on_howto, on_main_menu, on_quit):
         super().__init__()
         cx = constants.WIDTH // 2
         y = 200
@@ -353,6 +416,7 @@ class PauseMenu(Screen):
             ("RESUME", on_resume),
             ("CHANGE AIRFRAME", on_change_drone),
             ("SETTINGS", on_settings),
+            ("HOW TO PLAY", on_howto),
             ("MAIN MENU", on_main_menu),
             ("QUIT GAME", on_quit),
         ):
