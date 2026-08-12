@@ -423,6 +423,9 @@ class AccountMenu(Screen):
         depending on network/DNS setup, requesting it can come back as
         something confusing (e.g. a bare "Not Found") instead of a clean
         connection failure. Better to never fire the request at all."""
+        if backend.CONFIG_ERROR:
+            self.error = backend.CONFIG_ERROR
+            return True
         if backend.is_configured():
             return False
         self.error = "No backend deployed yet -- see backend/README.md."
@@ -535,7 +538,10 @@ class AccountMenu(Screen):
         for widget in (self.log_in_btn, self.sign_up_btn, self.github_btn, self.google_btn, self.back_btn):
             widget.draw(surface)
 
-        if not backend.is_configured():
+        if backend.CONFIG_ERROR:
+            note = get_font(14).render(backend.CONFIG_ERROR, True, constants.DANGER)
+            surface.blit(note, note.get_rect(center=(constants.WIDTH // 2, 560)))
+        elif not backend.is_configured():
             note = get_font(14).render(
                 "No backend deployed yet -- see backend/README.md. Playing offline works fine either way.",
                 True,
@@ -618,7 +624,9 @@ class LeaderboardMenu(Screen):
     def draw(self, surface):
         super().draw(surface)
 
-        if not backend.is_configured():
+        if backend.CONFIG_ERROR:
+            self._center_message(surface, backend.CONFIG_ERROR, color=constants.DANGER)
+        elif not backend.is_configured():
             self._center_message(surface, "No backend deployed yet -- see backend/README.md.")
         elif self.entries is None and self.error is None:
             self._center_message(surface, "Loading...")
