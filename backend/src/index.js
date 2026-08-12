@@ -295,6 +295,21 @@ export default {
     const url = new URL(request.url);
     for (const [method, path, handler] of ROUTES) {
       if (request.method === method && url.pathname === path) {
+        if (!env.DB && path !== "/auth/google/device/start") {
+          // By far the most common cause of a blanket 500 on every request:
+          // no D1 database bound (or bound under the wrong variable name --
+          // it must be exactly "DB"). Everything else below assumes env.DB
+          // exists and would otherwise fail deep inside db.js with a much
+          // less obvious "Cannot read properties of undefined" error.
+          return json(
+            {
+              error:
+                "Server misconfigured: no database bound. In the Cloudflare dashboard, go to this Worker's " +
+                "Bindings tab and attach your D1 database with variable name exactly DB, then redeploy.",
+            },
+            500
+          );
+        }
         try {
           return await handler(request, env);
         } catch (err) {

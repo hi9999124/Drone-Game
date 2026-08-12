@@ -136,7 +136,14 @@ def _request(url, payload=None, method="GET", token=None, timeout=REQUEST_TIMEOU
             body = json.loads(exc.read().decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             body = {}
-        raise BackendError(body.get("error", f"Server error ({exc.code})")) from exc
+        message = body.get("error", f"Server error ({exc.code})")
+        # A generic "Internal error" is useless for actually fixing anything
+        # -- the Worker's own detail (e.g. the real JS exception) is far
+        # more actionable, both for the player to screenshot and for anyone
+        # debugging their own deployment.
+        if body.get("detail"):
+            message = f"{message} ({body['detail']})"
+        raise BackendError(message) from exc
     except urllib.error.URLError as exc:
         raise BackendError(f"Could not reach server: {exc.reason}") from exc
     except TimeoutError as exc:

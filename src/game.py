@@ -136,17 +136,36 @@ class Game:
         # since it's still only ever rendering at the windowed resolution.
         # constants.WIDTH/HEIGHT get overwritten to match, and every menu's
         # cached layout is rebuilt below so it's sharp at the real size.
+        #
+        # pygame.FULLSCREEN alone was tried next and does a *real* OS-level
+        # display mode switch on some Windows/driver combinations -- which
+        # is exactly what caused the reported black-screen flash and every
+        # other fullscreen app on the machine getting kicked out of its own
+        # exclusive fullscreen when toggling back. A borderless window sized
+        # to exactly cover the desktop (no NOFRAME->real-fullscreen mode
+        # switch involved at all) gets the same visual result without ever
+        # touching the display's actual video mode.
         fullscreen = self.settings.get("fullscreen", False)
         try:
             if fullscreen:
-                self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                # pygame.display.Info() reports the *current window's* size
+                # once one already exists (always true here -- a windowed
+                # surface is created at startup), not the real desktop size,
+                # which would have made this a no-op borderless window
+                # rather than a fullscreen one. get_desktop_sizes() reads
+                # the actual display mode regardless of window state.
+                desktop_w, desktop_h = pygame.display.get_desktop_sizes()[0]
+                os.environ["SDL_VIDEO_WINDOW_POS"] = "0,0"
+                self.screen = pygame.display.set_mode((desktop_w, desktop_h), pygame.NOFRAME)
             else:
+                os.environ.pop("SDL_VIDEO_WINDOW_POS", None)
                 self.screen = pygame.display.set_mode((constants.WINDOWED_WIDTH, constants.WINDOWED_HEIGHT))
         except pygame.error:
             # No usable display (e.g. SDL's "dummy" video driver, used for
             # headless testing) -- fall back rather than crashing. Only ever
             # happens off a real display anyway.
             self.settings["fullscreen"] = False
+            os.environ.pop("SDL_VIDEO_WINDOW_POS", None)
             self.screen = pygame.display.set_mode((constants.WINDOWED_WIDTH, constants.WINDOWED_HEIGHT))
 
         constants.WIDTH, constants.HEIGHT = self.screen.get_size()
