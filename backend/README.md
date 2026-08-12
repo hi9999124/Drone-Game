@@ -151,9 +151,13 @@ At this point you're at the same place the CLI path reaches after its step
 3: username/password auth, coins/XP/levels, and the leaderboard are live.
 GitHub sign-in setup below is identical either way. For Google (needs a
 secret, which the CLI path sets via `wrangler secret put`), the dashboard
-equivalent is the same **Settings -> Bindings** page: **Add -> Secret**,
-name `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, paste the values from the
-Google setup below, save, redeploy.
+equivalent is on the Worker's **Settings** tab, in the **Variables and
+secrets** box: click **+ Add variable**, name it `GOOGLE_CLIENT_ID`, paste
+the value from the Google setup below (mark it **Secret** type if offered),
+save; repeat for `GOOGLE_CLIENT_SECRET`. (Cloudflare's dashboard has moved
+this a few times -- if your Worker's Settings tab looks different, look for
+whatever section lets you add a named variable/secret; it's no longer under
+a "Bindings -> Add -> Secret" path.)
 
 ## GitHub sign-in setup
 
@@ -189,7 +193,13 @@ this one has an extra step to store it in Cloudflare.
    that supports the device flow the game uses.
 5. Give it a name, click **Create**. Copy the **Client ID** and **Client
    Secret** shown.
-6. Back in your terminal:
+6. **Dashboard-only equivalent** (no terminal): on the Worker's **Settings**
+   tab, in the **Variables and secrets** box, click **+ Add variable** and
+   add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` with the values from
+   step 5, then save/redeploy. Skip the two `wrangler secret put` commands
+   below if you're doing it this way.
+
+   Back in your terminal (CLI path only):
 
    ```bash
    cd backend
