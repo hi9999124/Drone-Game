@@ -41,6 +41,7 @@ python main.py
 | `Shift` / `Q` | Descend |
 | `F` / left click | Use airframe ability (bomb, rocket, boost) |
 | `Esc` | Pause |
+| `F11` | Toggle fullscreen (also in Settings; desktop only) |
 
 Flight is arcade-style: thrust pushes in the direction you're facing (like
 *Asteroids*), with a separate altitude axis on top.

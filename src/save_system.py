@@ -29,6 +29,7 @@ DEFAULT_DATA = {
         "show_fps": False,
         "screen_shake": True,
         "touch_controls": "Auto",  # Auto / On / Off
+        "fullscreen": False,
     },
 }
 

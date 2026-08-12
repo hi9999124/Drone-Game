@@ -259,7 +259,7 @@ class SettingsMenu(Screen):
     title = "SETTINGS"
     dim_background = True
 
-    def __init__(self, settings, on_back, on_change):
+    def __init__(self, settings, on_back, on_change, show_fullscreen_option=True):
         super().__init__()
         self.settings = settings
         cx = constants.WIDTH // 2
@@ -270,6 +270,10 @@ class SettingsMenu(Screen):
             ("Screen shake", ["Off", "On"], "screen_shake"),
             ("Touch controls", ["Auto", "On", "Off"], "touch_controls"),
         ]
+        if show_fullscreen_option:
+            # Not offered on Android: the app is already fullscreen at the
+            # device's native resolution with no windowed mode to return to.
+            rows.append(("Fullscreen", ["Off", "On"], "fullscreen"))
         y = 200
         for label, values, key in rows:
             self.widgets.append(
@@ -299,11 +303,11 @@ class SettingsMenu(Screen):
 
     def _make_setter(self, key, on_change):
         def setter(value):
-            if value in ("On", "Off") and key in ("show_fps", "screen_shake"):
+            if value in ("On", "Off") and key in ("show_fps", "screen_shake", "fullscreen"):
                 self.settings[key] = value == "On"
             else:
                 self.settings[key] = value
-            on_change()
+            on_change(key)
 
         return setter
 

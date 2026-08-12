@@ -36,22 +36,22 @@ class Game:
         pygame.init()
         pygame.display.set_caption("Drone / PVO")
 
+        self.data = save_system.load()
+        self.profile = self.data["profile"]
+        self.account = self.data["account"]
+        self.settings = self.data["settings"]
+        self.pending_score_submit = None
+
         if IS_ANDROID:
             # Phones vary in resolution, so take a fullscreen surface at native
             # size and update the shared constants before any UI lays itself out.
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
             constants.WIDTH, constants.HEIGHT = self.screen.get_size()
         else:
-            self.screen = pygame.display.set_mode((constants.WIDTH, constants.HEIGHT))
+            self._apply_display_mode()
 
         self.clock = pygame.time.Clock()
         self.running = True
-
-        self.data = save_system.load()
-        self.profile = self.data["profile"]
-        self.account = self.data["account"]
-        self.settings = self.data["settings"]
-        self.pending_score_submit = None
 
         self.camera = Camera()
         self.hud = HUD()
@@ -82,7 +82,9 @@ class Game:
             self._return_to_menu,
             self._quit,
         )
-        self.settings_menu = SettingsMenu(self.settings, self._close_settings, self._on_settings_changed)
+        self.settings_menu = SettingsMenu(
+            self.settings, self._close_settings, self._on_settings_changed, show_fullscreen_option=not IS_ANDROID
+        )
         self.drone_menu = None
         self.result_menu = None
         self.account_menu = None
@@ -120,8 +122,35 @@ class Game:
     def _close_settings(self):
         self.state = STATE_PAUSED if self.previous_state == STATE_PAUSED else STATE_MENU
 
-    def _on_settings_changed(self):
+    def _on_settings_changed(self, key=None):
         self.camera.enable_shake = self.settings.get("screen_shake", True)
+        if key == "fullscreen" and not IS_ANDROID:
+            self._apply_display_mode()
+        self._autosave()
+
+    def _apply_display_mode(self):
+        # SCALED keeps every menu/HUD coordinate (all hardcoded against
+        # constants.WIDTH/HEIGHT) correct regardless of the real window or
+        # monitor resolution -- pygame letterboxes the fixed logical surface
+        # to fit and rescales mouse coordinates back down automatically, so
+        # nothing else in the game needs to know fullscreen happened.
+        flags = pygame.SCALED
+        if self.settings.get("fullscreen", False):
+            flags |= pygame.FULLSCREEN
+        try:
+            self.screen = pygame.display.set_mode((constants.WIDTH, constants.HEIGHT), flags)
+        except pygame.error:
+            # SCALED needs a renderer some drivers don't provide (e.g. SDL's
+            # "dummy" video driver, used for headless testing) -- fall back
+            # to a plain surface rather than crashing. Fullscreen just won't
+            # be available in that case, which only ever happens off a real
+            # display anyway.
+            flags &= ~pygame.SCALED
+            self.screen = pygame.display.set_mode((constants.WIDTH, constants.HEIGHT), flags)
+
+    def _toggle_fullscreen(self):
+        self.settings["fullscreen"] = not self.settings.get("fullscreen", False)
+        self._apply_display_mode()
         self._autosave()
 
     def _open_account(self):
@@ -235,6 +264,10 @@ class Game:
             if event.type == pygame.QUIT:
                 self._quit()
                 return
+
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_F11 and not IS_ANDROID:
+                self._toggle_fullscreen()
+                continue
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self._handle_escape()
