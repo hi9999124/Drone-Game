@@ -36,12 +36,42 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
       and four difficulty tiers
 - [x] **Full mission loop**: win/lose conditions, scoring, result screen,
       career progression
+- [x] **Ram-hit fix + FPV Kamikaze rebalance**: ramming a target now only
+      needs footprint overlap, not matching the building's exact altitude
+      (see "Fixed bugs" below), and FPV Kamikaze one-shots a standard target
+      instead of needing 3 airframes per building
+- [x] **Accounts, coins, XP, levels, ranks, leaderboard**: optional sign-in
+      (username/password, GitHub, or Google) syncing to a Cloudflare
+      Worker + D1 backend (`backend/`); fully playable offline with none of
+      this touched. See "Accounts & backend" below.
 - [ ] iOS — see "Mobile & iOS" below; blocked on a decision, not on code
-- [ ] **Online multiplayer** — not started. Everything today is offline vs. AI;
-      see "Multiplayer" below for what this actually costs
+- [ ] **Online multiplayer (real-time PvP)** — not started; this is
+      distinct from the accounts/leaderboard work above, which is
+      turn-based (submit a score, read a leaderboard), not live netcode.
+      See "Multiplayer" below for what real-time play actually costs
 - [ ] Ground-based PVO/SAM turrets as a third entity type (the original
       "play the air-defence side" idea)
 - [ ] Audio (engine loop, explosions) — no sound at all right now
+
+## Fixed bugs (worth knowing if you touch this code again)
+
+- **Ramming registered inconsistently / "can't hit any building."** Root
+  cause: collision was gated on `player.altitude < building.height`. The
+  drone spawns at a fixed altitude (110) with no gravity, so a player who
+  never touches climb/descend sits at exactly that altitude forever, and
+  building heights are chosen from `[55, 80, 110, 140, 175, 200]` — roughly
+  half the city was physically unhittable no matter how precisely you flew
+  into it. Fix (`World._resolve_player_collisions`): a kamikaze (ram-attack)
+  drone hitting a *target* only needs XY footprint overlap now; general
+  obstacle collision (non-target buildings, non-ram drones) still respects
+  altitude, so flying safely over a short building still works.
+- **FPV Kamikaze couldn't complete a mission.** Its `blast_damage` (120) was
+  under half of a standard target's HP (260), and each airframe is a single
+  use — destroying one target cost 3 airframes against a loadout of only 5
+  total, making all 5 mission targets mathematically undestroyable with the
+  starter drone. Bumped to 270 (one-shot). Both fixes verified with a
+  scripted "fly straight at a shorter-than-spawn-altitude target and confirm
+  it's destroyed" test, not just read through.
 
 ## Architecture
 
@@ -57,8 +87,15 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
   `player`, `enemy`, `building`, `projectile`
 - `src/drones.py` — airframe stat/ability table, the single place to tune or
   add a drone
-- `src/save_system.py` — profile + settings persistence
-- `src/ui/` — menus, HUD, touch pads, cached fonts
+- `src/save_system.py` — profile + account + settings persistence
+- `src/leveling.py` — XP/level/rank formula, mirrored exactly in
+  `backend/src/levels.js`
+- `src/backend.py` — HTTP client for the optional Cloudflare backend,
+  including the GitHub/Google OAuth device-flow polling loops
+- `src/ui/` — menus (incl. account sign-in, leaderboard), HUD, touch pads,
+  text input, cached fonts
+- `backend/` — Cloudflare Worker + D1: auth, coins/XP/levels, leaderboard
+  (see "Accounts & backend" below)
 
 ### How the 2.5D projection works
 
@@ -131,12 +168,46 @@ player experience (install a sideloading tool, sign with their own Apple ID,
 periodic re-signing) is a real step down from "download and tap an APK" —
 worth deciding on deliberately rather than defaulting into.
 
-## Multiplayer (not started)
+## Accounts & backend
 
-Offline vs. AI is done, including difficulty tiers. Online is the one item from
-the request that is **not** built, and it's worth being clear about why before
-starting it: it isn't a feature so much as a change to how the whole game is
-structured. Roughly what it involves:
+Cloudflare Worker + D1, `backend/` — see `backend/README.md` for the exact
+deploy runbook (D1 database creation, GitHub/Google OAuth app registration,
+`wrangler secret put` values). $0 on Cloudflare's free tier at this scale.
+
+- **Auth**: username/password (PBKDF2-SHA256 via Web Crypto, no external
+  dependency) or GitHub/Google via OAuth *device flow* -- the same pattern
+  `gh auth login` uses: the desktop game shows a short code, opens the
+  provider's approval page in the system browser, and polls until approved.
+  No browser redirect back into the app is needed, which matters because a
+  desktop app has no URL to redirect to. GitHub's device flow needs no
+  client secret (public-client-friendly by design); Google's does, so for
+  Google specifically the Worker proxies the whole flow and holds the secret
+  server-side -- the desktop client never sees it.
+- **Coins/XP/levels**: tracked locally regardless of account (`src/leveling.py`),
+  mirrored exactly by `backend/src/levels.js` so a synced total never
+  disagrees between the two. `xp = score`, `coins = score / 20` per mission.
+- **Leaderboard**: `GET /leaderboard`, ranked by career (total) score.
+- Every endpoint was verified against a real local D1 database
+  (`wrangler dev`) end-to-end from `src/backend.py` -- signup, login, wrong
+  password, score submission, leaderboard ranking, and the full sign-up ->
+  play a mission -> score reaches the server -> appears on the leaderboard
+  path -- not just written and assumed correct.
+- **Not verified**: the actual GitHub/Google device-flow UX end-to-end,
+  since that needs real registered OAuth apps and a real browser to click
+  through, neither of which exists in this environment. The HTTP contracts
+  match both providers' documented device-flow specs precisely, but this is
+  the one piece worth testing by hand after deploying.
+
+## Multiplayer (real-time PvP, not started)
+
+Offline vs. AI is done, including difficulty tiers, and there's now an
+optional online *leaderboard* (see "Accounts & backend" above) -- but that's
+fundamentally different from live multiplayer: submitting a final score after
+a match is a simple request/response, while two players seeing each other
+move in real time is a standing connection with an authoritative simulation.
+It's worth being clear about that gap before starting on it, since it isn't a
+small feature so much as a change to how the whole game is structured.
+Roughly what it involves:
 
 - **Authority.** Right now `World` mutates state directly and trusts itself.
   Networked play needs one authoritative simulation (host or dedicated server)

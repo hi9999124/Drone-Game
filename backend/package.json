@@ -1,0 +1,15 @@
+{
+  "name": "dronepvo-backend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 execute dronepvo --local --file=schema.sql",
+    "db:migrate:remote": "wrangler d1 execute dronepvo --remote --file=schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

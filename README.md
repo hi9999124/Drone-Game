@@ -85,17 +85,38 @@ app's private directory on Android) after every mission and settings change.
 Writes go through a temp file and atomic replace, so a crash mid-save can't
 corrupt the profile.
 
+## Accounts, coins, levels, leaderboard
+
+Entirely optional — the game is fully playable offline with no account, and
+coins/XP/levels are tracked locally either way. Signing in (from the main
+menu's ACCOUNT screen) additionally syncs your progress to a small Cloudflare
+backend and puts you on the online leaderboard.
+
+- **Sign in** with a username/password, GitHub, or Google — pick whichever.
+- **Coins & XP** are earned from mission score (`xp = score`,
+  `coins = score / 20`); XP drives **levels**, and levels map to **ranks**
+  (Rookie → Cadet → Veteran → Ace → Legend).
+- **Leaderboard** ranks every signed-in player by career score.
+
+The backend (Cloudflare Worker + D1) lives in [`backend/`](backend/) — see
+[`backend/README.md`](backend/README.md) for exact deploy steps (it's not
+live by default; `src/backend.py`'s `API_BASE` is a placeholder until you
+deploy it and fill that in). Every endpoint it exposes was tested against a
+real local database before being written up, not just designed on paper.
+
 ## Project structure
 
 ```
 main.py               Entry point
 requirements.txt      Just pygame
 src/
-  game.py              State machine (menu / select / settings / play / pause / result)
+  game.py              State machine (menu / select / settings / account / leaderboard / play / pause / result)
   world.py             City generation, collisions, mission rules, depth-sorted draw
   camera.py            Follow camera, screen shake, world -> screen projection
   drones.py            Airframe definitions (stats + abilities)
-  save_system.py       Atomic JSON save/load for profile + settings
+  save_system.py       Atomic JSON save/load for profile + account + settings
+  leveling.py          XP/level/rank formula (mirrored exactly in backend/src/levels.js)
+  backend.py           HTTP client for the optional Cloudflare backend + OAuth device flows
   constants.py         Screen size, projection scale, palette
   utils.py             lerp / clamp helpers
   entities/
@@ -106,11 +127,13 @@ src/
     projectile.py       Bombs, rockets, explosions
   ui/
     button.py           Hover-animated button + settings option row
-    menu.py             Main / drone select / settings / pause / result screens
-    hud.py              Flight, ability and mission panels, off-screen target arrows
+    menu.py             Main / drone select / settings / account / leaderboard / pause / result screens
+    hud.py               Flight, ability and mission panels, off-screen target arrows
     touch_controls.py   Responsive on-screen pads (touch + mouse)
-    fonts.py            Cached font loader
+    text_input.py        Single-line text field (username/password entry)
+    fonts.py             Cached font loader
 buildozer.spec        Android (APK) packaging config for python-for-android
+backend/               Cloudflare Worker + D1: accounts, coins/XP/levels, leaderboard (see backend/README.md)
 ```
 
 ## Release channels

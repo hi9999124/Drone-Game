@@ -13,6 +13,16 @@ DEFAULT_DATA = {
         "targets_destroyed": 0,
         "enemies_destroyed": 0,
         "last_drone": "fpv",
+        # Coins/XP/level are tracked locally regardless of whether an
+        # account is signed in, so the game is never blocked on the
+        # network -- signing in just adds server-side sync on top.
+        "coins": 0,
+        "xp": 0,
+        "level": 1,
+    },
+    "account": {
+        "username": None,
+        "token": None,
     },
     "settings": {
         "difficulty": "Normal",
@@ -39,7 +49,7 @@ SAVE_PATH = os.path.join(_save_dir(), "savegame.json")
 def _merge_defaults(loaded):
     """Fill in any keys a save file is missing, so old saves survive new fields."""
     data = json.loads(json.dumps(DEFAULT_DATA))  # deep copy
-    for section in ("profile", "settings"):
+    for section in ("profile", "account", "settings"):
         for key, value in loaded.get(section, {}).items():
             if key in data[section]:
                 data[section][key] = value
