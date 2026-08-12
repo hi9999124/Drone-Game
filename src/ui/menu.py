@@ -137,26 +137,38 @@ class MainMenu(Screen):
         surface.blit(hint, hint.get_rect(center=(constants.WIDTH // 2, constants.HEIGHT - 30)))
 
 
+_MODE_DESCRIPTIONS = {
+    "DRONE STRIKE": ["Fly a drone and destroy", "the city's marked targets."],
+    "AIR DEFENSE": ["Man a PVO turret and defend", "civilian structures from", "incoming raiders."],
+    "CIVILIAN SURVIVAL": ["No weapon -- reach shelter", "before a telegraphed strike", "lands. Survive the bombardment."],
+}
+
+
 class ModeSelectMenu(Screen):
-    """Pick a side before picking a loadout: attack (Drone Strike, the
-    original mission) or defend (Air Defense, manning a PVO turret against
-    incoming raiders)."""
+    """Pick a side: attack (Drone Strike, the original mission), defend
+    (Air Defense, manning a PVO turret against incoming raiders), or
+    survive (Civilian Survival, on foot with no weapon)."""
 
     title = "CHOOSE YOUR SIDE"
     dim_background = True
 
-    def __init__(self, on_drone_mode, on_defense_mode, on_back):
+    def __init__(self, on_drone_mode, on_defense_mode, on_survival_mode, on_back):
         super().__init__()
         cx = constants.WIDTH // 2
-        card_w, card_h = 260, 190
-        gap = 40
-        left_x = cx - card_w - gap // 2
-        right_x = cx + gap // 2
-        self.cards = [
-            (pygame.Rect(left_x, 220, card_w, card_h), "DRONE STRIKE", on_drone_mode, constants.ACCENT),
-            (pygame.Rect(right_x, 220, card_w, card_h), "AIR DEFENSE", on_defense_mode, constants.GOOD),
+        card_w, card_h = 250, 200
+        gap = 26
+        total_w = 3 * card_w + 2 * gap
+        start_x = cx - total_w // 2
+        entries = [
+            ("DRONE STRIKE", on_drone_mode, constants.ACCENT),
+            ("AIR DEFENSE", on_defense_mode, constants.GOOD),
+            ("CIVILIAN SURVIVAL", on_survival_mode, constants.WARN),
         ]
-        self.widgets = [Button((cx - 110, 460, 220, 48), "BACK", on_back, font_size=20)]
+        self.cards = [
+            (pygame.Rect(start_x + i * (card_w + gap), 210, card_w, card_h), label, callback, color)
+            for i, (label, callback, color) in enumerate(entries)
+        ]
+        self.widgets = [Button((cx - 110, 440, 220, 48), "BACK", on_back, font_size=20)]
 
     def handle_event(self, event, mouse_pos):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -175,19 +187,18 @@ class ModeSelectMenu(Screen):
             pygame.draw.rect(surface, bg, rect, border_radius=12)
             pygame.draw.rect(surface, color, rect, width=2, border_radius=12)
 
-            title = get_font(24, bold=True).render(label, True, color)
-            surface.blit(title, title.get_rect(center=(rect.centerx, rect.y + 46)))
+            title = get_font(20, bold=True).render(label, True, color)
+            title_rect = title.get_rect(center=(rect.centerx, rect.y + 40))
+            if title_rect.width > rect.width - 16:
+                title = get_font(16, bold=True).render(label, True, color)
+                title_rect = title.get_rect(center=(rect.centerx, rect.y + 40))
+            surface.blit(title, title_rect)
 
-            lines = (
-                ["Fly a drone and destroy", "the city's marked targets."]
-                if label == "DRONE STRIKE"
-                else ["Man a PVO turret and defend", "civilian structures from", "incoming raiders."]
-            )
-            y = rect.y + 92
-            for line in lines:
-                surf = get_font(14).render(line, True, constants.TEXT_DIM)
+            y = rect.y + 82
+            for line in _MODE_DESCRIPTIONS[label]:
+                surf = get_font(13).render(line, True, constants.TEXT_DIM)
                 surface.blit(surf, surf.get_rect(center=(rect.centerx, y)))
-                y += 20
+                y += 19
 
 
 class HowToMenu(Screen):

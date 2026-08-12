@@ -62,7 +62,13 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
       attacking BPLAs (`src/entities/raider.py`), mission rules in
       `src/defense_world.py`. Single-player against AI raiders for now;
       networking this against a human Drone player is Stage 3 below.
-- [ ] **Civilians (survival) team** — see "Teams & multiplayer" below
+- [x] **Playable Civilians (Survival mode)**: also from the main menu's mode
+      select. On foot, no weapon, direct 8-way movement -- deliberately a
+      different verb from the other two modes (flying-and-attacking,
+      aiming-and-shooting). Telegraphed strikes (a warning circle, then
+      impact) land across the city; reach a marked shelter
+      (`Building.is_shelter`) before the timer runs out or take damage.
+      Mission rules in `src/survival_world.py`.
 - [ ] Audio (engine loop, explosions) — no sound at all right now
 
 ## Fixed bugs (worth knowing if you touch this code again)
@@ -234,12 +240,13 @@ project has had), and is exactly what a networked human PVO player will be
 controlling once Stage 3 exists. Remaining, lower-priority polish: more unit
 types (a radar station buffing nearby SAM range, a mobile short-range SAM).
 
-**Stage 2 -- Civilians (survival) mode.**
-A new mission type, playable solo or (later) alongside a Drone or PVO
-player: protect civilian population zones (inverts the current "destroy
-targets" objective into "keep these standing") with some kind of
-survivability meter instead of a target-destroyed counter. Needs its own
-win/lose rules in `World`, not just a reskin of the current mission.
+**Stage 2 -- Civilians (survival) mode (done).**
+`src/survival_world.py`: on foot, no weapon, reach a marked shelter before a
+telegraphed strike lands. Its own win/lose rules (survive the bombardment
+duration vs. HP hitting zero), not a reskin of Drone Strike or Air Defense --
+verified via headless testing that both a "run to shelter" and a "don't
+react to warnings" scripted player can complete it, and that a forced
+direct hit both damages the player and can end the mission in a loss.
 
 **Stage 3 -- LAN direct-connect multiplayer.**
 The actual netcode foundation, and the biggest architectural change in the

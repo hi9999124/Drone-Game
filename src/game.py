@@ -6,6 +6,7 @@ import pygame
 from . import backend, constants, drones, leveling, save_system, world as world_module
 from .camera import Camera
 from .defense_world import DefenseWorld
+from .survival_world import SurvivalWorld
 from .ui.hud import HUD
 from .ui.menu import (
     AccountMenu,
@@ -85,7 +86,9 @@ class Game:
             self._open_settings,
             self._quit,
         )
-        self.mode_select_menu = ModeSelectMenu(self._open_drone_select, self._open_defense_select, self._close_mode_select)
+        self.mode_select_menu = ModeSelectMenu(
+            self._open_drone_select, self._open_defense_select, self._start_survival_mission, self._close_mode_select
+        )
         self.howto_menu = HowToMenu(self._close_howto)
         self.pause_menu = PauseMenu(
             self._resume,
@@ -149,8 +152,13 @@ class Game:
         # PauseMenu's single "CHANGE LOADOUT" button dispatches to whichever
         # select screen matches the mission already in progress -- there's
         # no reason to make a player re-choose attack-vs-defend mid-mission.
-        if self.world is not None and self.world.mode == "defense":
+        # Survival has no loadout to pick (just the one character), so it
+        # falls back to mode select -- effectively "change side" for it.
+        mode = self.world.mode if self.world is not None else "strike"
+        if mode == "defense":
             self._open_defense_select()
+        elif mode == "survival":
+            self._open_mode_select()
         else:
             self._open_drone_select()
 
@@ -309,9 +317,22 @@ class Game:
         self.touch.release_all()
         self.state = STATE_PLAYING
 
+    def _start_survival_mission(self):
+        self.world = SurvivalWorld(self.settings.get("difficulty", "Normal"))
+        self.world.notify("No weapon -- reach a shelter before the warning circle detonates", duration=5.0)
+        self.camera.enable_shake = self.settings.get("screen_shake", True)
+        self.camera.snap_to(self.world.player.pos)
+        self._tracked_player = self.world.player
+        self.touch.release_all()
+        self.state = STATE_PLAYING
+
     def _retry(self):
-        if self.world is not None and self.world.mode == "defense":
+        if self.world is None:
+            self._start_mission(self.profile.get("last_drone", "fpv"))
+        elif self.world.mode == "defense":
             self._start_defense_mission(self.world.player.type.key)
+        elif self.world.mode == "survival":
+            self._start_survival_mission()
         else:
             self._start_mission(self.profile.get("last_drone", "fpv"))
 
@@ -499,16 +520,21 @@ class Game:
     def _finish_mission(self):
         world = self.world
         won = world.result == world_module.RESULT_WON
-        defense = world.mode == "defense"
+        mode = world.mode
 
         self.profile["total_score"] += world.score
         self.profile["best_score"] = max(self.profile["best_score"], world.score)
-        if defense:
+        if mode == "defense":
             # Air Defense doesn't destroy targets or fight airborne hostiles
             # in the drone-mission sense -- raiders shot down are the closest
             # analog to "enemies destroyed" and feed the same backend field.
             enemies_destroyed = world.raiders_destroyed
             targets_destroyed = 0
+        elif mode == "survival":
+            # Survival has no combat stats at all -- strikes survived is the
+            # closest analog to "targets destroyed" (a completion measure).
+            enemies_destroyed = 0
+            targets_destroyed = world.strikes_survived
         else:
             self.profile["targets_destroyed"] += world.targets_destroyed
             self.profile["enemies_destroyed"] += world.enemies_destroyed
@@ -535,7 +561,7 @@ class Game:
                 backend.submit_score, token, world.score, won, targets_destroyed, enemies_destroyed
             )
 
-        if defense:
+        if mode == "defense":
             summary = [
                 ("SCORE", world.score),
                 ("STRUCTURES SAVED", f"{world.protected_remaining}/{len(world.protected)}"),
@@ -546,6 +572,17 @@ class Game:
                 ("CAREER TOTAL", self.profile["total_score"]),
             ]
             change_loadout = self._open_defense_select
+        elif mode == "survival":
+            summary = [
+                ("SCORE", world.score),
+                ("SURVIVED", "YES" if won else "NO"),
+                ("STRIKES SURVIVED", world.strikes_survived),
+                ("TIME", f"{world.elapsed:.0f}s / {world.duration:.0f}s"),
+                ("COINS EARNED", f"+{coins_gained}"),
+                ("XP EARNED", f"+{xp_gained}" + ("  LEVEL UP!" if leveled_up else "")),
+                ("CAREER TOTAL", self.profile["total_score"]),
+            ]
+            change_loadout = self._open_mode_select
         else:
             summary = [
                 ("SCORE", world.score),

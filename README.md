@@ -59,6 +59,21 @@ an extruded roof and front wall, and they physically block you: fly over a
 120 m block or route around it, because clipping one at speed wrecks the
 airframe.
 
+## Game modes
+
+**PLAY** from the main menu leads to a side-select screen with three modes:
+
+| Mode | You play | Objective |
+|---|---|---|
+| Drone Strike | A drone (see Airframes below) | Destroy every marked target while interceptors and PVO air defense hunt you |
+| Air Defense | A PVO turret (flak gun or SAM site) | Shoot down waves of attacking drones before they destroy protected structures |
+| Civilian Survival | A civilian on foot, unarmed | Reach shelter before each telegraphed strike lands; survive the bombardment |
+
+Each is a genuinely different way of playing, not a reskin: flying-and-attacking,
+aiming-and-shooting, and reading-the-map-and-reacting, respectively. See
+[`PROJECT_PLAN.md`](PROJECT_PLAN.md) for what's next (playable teams over
+LAN/RadminVPN multiplayer, then a room server).
+
 ## Airframes
 
 | Airframe | Style | Ability | Unlocks at |
@@ -71,7 +86,7 @@ airframe.
 Unlocks are driven by *career* score, which accumulates across runs and is
 saved automatically.
 
-## Mission
+## Mission (Drone Strike)
 
 Destroy every marked target block (red, with a crosshair on the roof) while
 enemy FPV interceptors hunt you. Off-screen targets are marked by arrows at the
@@ -122,8 +137,10 @@ being written up, not just designed on paper.
 main.py               Entry point
 requirements.txt      Just pygame
 src/
-  game.py              State machine (menu / select / settings / account / leaderboard / play / pause / result)
-  world.py             City generation, collisions, mission rules, depth-sorted draw
+  game.py              State machine (menu / mode select / settings / account / leaderboard / play / pause / result)
+  world.py             Drone Strike: city generation, collisions, mission rules, depth-sorted draw
+  defense_world.py     Air Defense: waves of raiders, protected structures, mission rules
+  survival_world.py    Civilian Survival: telegraphed strikes, shelters, mission rules
   camera.py            Follow camera, screen shake, world -> screen projection
   drones.py            Airframe definitions (stats + abilities)
   save_system.py       Atomic JSON save/load for profile + account + settings
@@ -137,7 +154,10 @@ src/
     enemy.py            Interceptor AI + difficulty profiles
     building.py         Apartment blocks: extruded 2.5D draw, damage
     projectile.py       Bombs, rockets, guided missiles, explosions
-    pvo.py              Ground-based air defense: flak gun + SAM site AI
+    pvo.py              Ground-based air defense: flak gun + SAM site stats/AI
+    player_turret.py    Air Defense: player-controlled turret (aim + fire)
+    raider.py           Air Defense: attacking-drone AI
+    civilian.py         Civilian Survival: player character (on-foot movement)
   ui/
     button.py           Hover-animated button + settings option row
     menu.py             Main / drone select / settings / account / leaderboard / pause / result screens

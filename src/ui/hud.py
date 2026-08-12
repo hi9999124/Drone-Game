@@ -9,6 +9,8 @@ class HUD:
     def draw(self, surface, world, camera, show_fps=False, fps=0.0):
         if world.mode == "defense":
             self._draw_defense_hud(surface, world, camera)
+        elif world.mode == "survival":
+            self._draw_survival_hud(surface, world, camera)
         else:
             self._draw_strike_hud(surface, world, camera)
         if show_fps:
@@ -32,6 +34,12 @@ class HUD:
             self._draw_turret_panel(surface, player)
         self._draw_defense_mission_panel(surface, world)
         self._draw_raider_compass(surface, world, camera)
+
+    def _draw_survival_hud(self, surface, world, camera):
+        player = world.player
+        if player is not None and player.alive:
+            self._draw_survivor_panel(surface, player, world)
+        self._draw_survival_mission_panel(surface, world)
 
     def _panel(self, surface, rect):
         panel = pygame.Surface(rect.size, pygame.SRCALPHA)
@@ -261,6 +269,54 @@ class HUD:
             left = edge - direction * 6 + perpendicular * 7
             right = edge - direction * 6 - perpendicular * 7
             pygame.draw.polygon(surface, constants.WARN, [tip, left, right])
+
+    def _draw_survivor_panel(self, surface, player, world):
+        rect = pygame.Rect(18, 18, 250, 96)
+        self._panel(surface, rect)
+
+        title = get_font(16, bold=True).render("SURVIVAL", True, constants.ACCENT)
+        surface.blit(title, (rect.x + 14, rect.y + 10))
+
+        self._bar(
+            surface,
+            pygame.Rect(rect.x + 14, rect.y + 38, rect.width - 28, 8),
+            player.hp / player.max_hp,
+            constants.GOOD if player.hp > player.max_hp * 0.5 else constants.DANGER,
+            "HEALTH",
+        )
+
+        in_shelter = world.in_shelter(player.pos)
+        status = "IN SHELTER" if in_shelter else "EXPOSED"
+        color = constants.GOOD if in_shelter else constants.WARN
+        status_surf = get_font(14, bold=True, mono=True).render(status, True, color)
+        surface.blit(status_surf, (rect.x + 14, rect.y + 68))
+
+        hint = get_font(12, mono=True).render("WASD / arrows to move", True, constants.TEXT_FAINT)
+        surface.blit(hint, (rect.right - hint.get_width() - 14, rect.y + 70))
+
+    def _draw_survival_mission_panel(self, surface, world):
+        rect = pygame.Rect(constants.WIDTH - 268, 18, 250, 96)
+        self._panel(surface, rect)
+
+        title = get_font(15, bold=True).render("BOMBARDMENT", True, constants.TEXT_DIM)
+        surface.blit(title, (rect.x + 14, rect.y + 10))
+
+        remaining = max(0.0, world.duration - world.elapsed)
+        time_surf = get_font(17, bold=True, mono=True).render(f"TIME LEFT  {remaining:4.0f}s", True, constants.ACCENT)
+        surface.blit(time_surf, (rect.x + 14, rect.y + 32))
+
+        self._bar(
+            surface,
+            pygame.Rect(rect.x + 14, rect.y + 58, rect.width - 28, 8),
+            world.elapsed / world.duration if world.duration else 0.0,
+            constants.ACCENT,
+            "PROGRESS",
+        )
+
+        survived = get_font(13, mono=True).render(
+            f"strikes survived {world.strikes_survived}", True, constants.TEXT_FAINT
+        )
+        surface.blit(survived, (rect.x + 14, rect.y + 78))
 
     def _draw_message(self, surface, message):
         text = get_font(26, bold=True).render(message, True, constants.WARN)

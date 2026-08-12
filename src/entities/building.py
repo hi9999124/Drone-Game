@@ -15,7 +15,7 @@ class Building:
     so the per-frame cost stays a couple of blits.
     """
 
-    def __init__(self, x, y, width, depth, height, is_target=False, is_protected=False):
+    def __init__(self, x, y, width, depth, height, is_target=False, is_protected=False, is_shelter=False):
         self.rect = pygame.Rect(int(x), int(y), int(width), int(depth))
         self.height = float(height)
         self.is_target = is_target
@@ -23,6 +23,10 @@ class Building:
         # civilian structure raiders are trying to destroy and the player is
         # trying to keep standing, rather than something the player attacks.
         self.is_protected = is_protected
+        # is_shelter: Civilian Survival mode's safe zone -- indestructible
+        # (there's nothing to damage it in that mode), just a footprint the
+        # player needs to be standing inside of when a strike lands.
+        self.is_shelter = is_shelter
         self.max_hp = 260.0 if (is_target or is_protected) else 0.0
         self.hp = self.max_hp
         self.destroyed = False
@@ -73,6 +77,8 @@ class Building:
             wall_color, roof_color = constants.TARGET_WALL, constants.TARGET_ROOF
         elif self.is_protected:
             wall_color, roof_color = constants.PROTECTED_WALL, constants.PROTECTED_ROOF
+        elif self.is_shelter:
+            wall_color, roof_color = constants.SHELTER_WALL, constants.SHELTER_ROOF
         else:
             wall_color, roof_color = constants.BUILDING_WALL, constants.BUILDING_ROOF
 
@@ -96,6 +102,8 @@ class Building:
             self._draw_target_marker(surface, roof_points, left, right, top, lift)
         elif self.is_protected:
             self._draw_protected_marker(surface, roof_points, left, right, top, lift)
+        elif self.is_shelter:
+            self._draw_shelter_marker(surface, roof_points, left, right, top, lift)
 
     def _draw_windows(self, surface, wall_rect):
         grid, seed = self._windows
@@ -160,6 +168,22 @@ class Building:
             pygame.draw.rect(surface, (18, 34, 26), (bar_x, bar_y, bar_w, 5))
             frac = clamp(self.hp / self.max_hp, 0.0, 1.0)
             pygame.draw.rect(surface, constants.GOOD, (bar_x, bar_y, bar_w * frac, 5))
+
+    def _draw_shelter_marker(self, surface, roof_points, left, right, top, lift):
+        cx = (left + right) * 0.5
+        cy = top - lift
+        pygame.draw.polygon(surface, constants.ACCENT, roof_points, width=2)
+        size = 9
+        # A simple house/roof glyph -- reads as "shelter" at a glance,
+        # distinct from the shield (protect) and crosshair (attack) marks.
+        roof = [(cx, cy - size), (cx + size, cy + size * 0.3), (cx - size, cy + size * 0.3)]
+        pygame.draw.polygon(surface, constants.ACCENT, roof, width=2)
+        pygame.draw.line(
+            surface, constants.ACCENT, (cx - size * 0.5, cy + size * 0.3), (cx - size * 0.5, cy + size), 2
+        )
+        pygame.draw.line(
+            surface, constants.ACCENT, (cx + size * 0.5, cy + size * 0.3), (cx + size * 0.5, cy + size), 2
+        )
 
     def _draw_rubble(self, surface, camera):
         left, top = camera.to_screen(self.rect.left, self.rect.top, 0.0)
