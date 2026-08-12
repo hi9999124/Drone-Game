@@ -47,7 +47,12 @@ DRONE_TYPES = [
         climb_speed=150.0,
         ammo=0,
         blast_radius=95.0,
-        blast_damage=120.0,
+        # One-shot vs. a standard target's 260 HP: each airframe is a single
+        # use, so a ram that doesn't destroy its target on impact would mean
+        # you could never actually complete a mission (destroying all 5
+        # targets would cost 3 airframes each -- 15 units against a loadout
+        # of 5). "Kamikaze" implies a decisive hit, not a chip-damage one.
+        blast_damage=270.0,
         ability_name="Boost",
         ability_desc="Short burst of speed to close the last 50 m before impact.",
         cooldown=2.5,

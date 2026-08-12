@@ -172,17 +172,28 @@ class World:
 
     def _resolve_player_collisions(self):
         player = self.player
+        is_kamikaze = player.type.attack == "ram"
+
         for building in self.buildings:
-            if not building.blocks_at(player.pos.x, player.pos.y, player.altitude):
+            if building.destroyed:
                 continue
 
-            if player.type.attack == "ram" and building.is_target:
+            # A kamikaze drone rams a target the moment it crosses the
+            # footprint, regardless of altitude. Gating this on
+            # blocks_at()'s altitude<height check meant a drone flying at
+            # its (fixed, no-gravity) spawn altitude of 110 could never
+            # touch off roughly half the city's buildings (heights
+            # 55/80/110 in the generator) no matter how precisely you flew
+            # into them -- functionally "can't hit any building" for
+            # anyone who never discovers the climb/descend keys.
+            if is_kamikaze and building.is_target and building.contains_point(player.pos.x, player.pos.y):
                 self._ram_strike(building)
                 return
 
-            # Non-ram airframes (or ramming a non-target) just crash into it.
-            self._crash(player, "Hit a building")
-            return
+            if building.blocks_at(player.pos.x, player.pos.y, player.altitude):
+                # Non-ram airframes (or ramming a non-target) just crash into it.
+                self._crash(player, "Hit a building")
+                return
 
         for enemy in self.enemies:
             if not enemy.alive:
