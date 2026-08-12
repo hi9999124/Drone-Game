@@ -1,1 +1,9 @@
 pygame>=2.5.0
+
+# Only used for internet Room play (src/room_client.py) -- LAN/RadminVPN
+# multiplayer (src/net.py) needs nothing beyond the standard library and
+# works with this absent. Guarded with a plain try/except ImportError at the
+# one place it's used, so a source checkout without it still runs fine with
+# Room play simply unavailable; included here so packaged releases ship with
+# Room play working out of the box.
+websockets>=11.0

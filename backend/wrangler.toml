@@ -7,3 +7,18 @@ compatibility_date = "2026-08-01"
 binding = "DB"
 database_name = "dronepvo"
 database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+# Stage 4: internet room play (public/private rooms, WebSocket relay).
+# No setup needed beyond deploying -- unlike D1, Durable Objects don't need
+# a separate create-and-paste-the-ID step.
+[[durable_objects.bindings]]
+name = "ROOM_RELAY"
+class_name = "RoomRelay"
+
+[[durable_objects.bindings]]
+name = "ROOM_DIRECTORY"
+class_name = "RoomDirectory"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomRelay", "RoomDirectory"]

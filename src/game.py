@@ -1,10 +1,11 @@
 import os
 import random
+import string
 import sys
 
 import pygame
 
-from . import backend, constants, drones, leveling, net, save_system, world as world_module
+from . import backend, constants, drones, leveling, net, room_client, save_system, world as world_module
 from .camera import Camera
 from .defense_world import DefenseWorld
 from .entities import pvo
@@ -23,6 +24,9 @@ from .ui.menu import (
     MultiplayerMenu,
     PauseMenu,
     ResultMenu,
+    RoomHostWaitingMenu,
+    RoomJoinMenu,
+    RoomMenu,
     SettingsMenu,
 )
 from .ui.touch_controls import TouchControls
@@ -36,6 +40,10 @@ STATE_MP_MENU = "mp_menu"
 STATE_MP_HOST_SELECT = "mp_host_select"
 STATE_MP_HOSTING = "mp_hosting"
 STATE_MP_JOIN = "mp_join"
+STATE_ROOM_MENU = "room_menu"
+STATE_ROOM_HOST_SELECT = "room_host_select"
+STATE_ROOM_HOSTING = "room_hosting"
+STATE_ROOM_JOIN = "room_join"
 STATE_SETTINGS = "settings"
 STATE_ACCOUNT = "account"
 STATE_LEADERBOARD = "leaderboard"
@@ -45,6 +53,10 @@ STATE_PAUSED = "paused"
 STATE_RESULT = "result"
 
 MP_JOIN_TIMEOUT = 8.0
+# A Room connection hops through the relay (an extra network round trip
+# beyond a direct LAN packet), so it gets more slack before giving up.
+ROOM_JOIN_TIMEOUT = 15.0
+ROOM_CODE_CHARS = string.ascii_uppercase + string.digits
 
 # python-for-android sets this env var; it's the standard way to detect
 # "running as a packaged Android app" from within the app itself.
@@ -91,6 +103,14 @@ class Game:
         self._mp_pvo_unit_key = None
         self._mp_remote_controls = {}
         self._mp_join_timer = 0.0
+        # Room-play (Stage 4) specific connection state -- self._mp_net/
+        # self._mp_peer_addr above are shared with LAN play once a match is
+        # actually running (see room_client.RoomTransport).
+        self._room_is_public = False
+        self._room_code = None
+        self._room_create_sent = False
+        self._room_pvo_unit_key = None
+        self._room_join_sent = False
 
         self._build_menus()
 
@@ -114,7 +134,12 @@ class Game:
             self._open_multiplayer_menu,
             self._close_mode_select,
         )
-        self.mp_menu = MultiplayerMenu(self._open_mp_host_select, self._open_mp_join, self._close_multiplayer_menu)
+        self.mp_menu = MultiplayerMenu(
+            self._open_mp_host_select, self._open_mp_join, self._open_room_menu, self._close_multiplayer_menu
+        )
+        self.room_menu = RoomMenu(
+            self._open_room_host_public, self._open_room_host_private, self._open_room_join, self._close_room_menu
+        )
         self.howto_menu = HowToMenu(self._close_howto)
         self.pause_menu = PauseMenu(
             self._resume,
@@ -132,6 +157,9 @@ class Game:
         self.mp_host_select_menu = None
         self.host_waiting_menu = None
         self.join_menu = None
+        self.room_host_select_menu = None
+        self.room_host_waiting_menu = None
+        self.room_join_menu = None
         self.result_menu = None
         self.account_menu = None
         self.leaderboard_menu = None
@@ -255,6 +283,157 @@ class Game:
         self._mp_net.send(self._mp_peer_addr, {"type": "join", "pvo_unit": unit_key})
         self._mp_join_timer = MP_JOIN_TIMEOUT
         self.join_menu.status_text = "Connecting..."
+
+    # --------------------------------------------------- multiplayer: rooms
+    #
+    # Everything past the connection handshake below (_start_versus_match,
+    # _update_versus, _finish_versus_match, forfeit-on-leave) is exactly the
+    # same code the LAN path above uses -- room_client.RoomTransport adapts
+    # a single WebSocket pipe to the same (addr, message) send()/poll()
+    # shape as net.UDPTransport, so self._mp_net works identically either
+    # way once a match is actually running. Only *getting* two players onto
+    # that shared self._mp_net differs: a direct UDP "join" packet doubles
+    # as both connection and handshake on LAN, but a Room connection needs
+    # its own connect / create_room-or-join_room / wait-for-ack sequence
+    # first, driven by _poll_room_hosting/_poll_room_joining below.
+
+    def _open_room_menu(self):
+        self.previous_state = self.state
+        self.state = STATE_ROOM_MENU
+
+    def _close_room_menu(self):
+        self.state = STATE_MP_MENU
+
+    def _open_room_host_public(self):
+        self._open_room_host_select(is_public=True)
+
+    def _open_room_host_private(self):
+        self._open_room_host_select(is_public=False)
+
+    def _open_room_host_select(self, is_public):
+        self.room_host_select_menu = DroneSelectMenu(
+            self.profile,
+            lambda drone_key: self._host_room(drone_key, is_public),
+            self._close_room_host_select,
+            selected_key=self.profile.get("last_drone"),
+        )
+        self.previous_state = self.state
+        self.state = STATE_ROOM_HOST_SELECT
+
+    def _close_room_host_select(self):
+        self.state = STATE_ROOM_MENU
+
+    def _host_room(self, drone_key, is_public):
+        self.profile["last_drone"] = drone_key
+        self._autosave()
+        code = "".join(random.choices(ROOM_CODE_CHARS, k=6))
+        self._mp_drone_key = drone_key
+        self._mp_peer_addr = None
+        self._room_is_public = is_public
+        self._room_code = code
+        self._room_create_sent = False
+        client = room_client.RoomClient(room_client.ws_url(backend.API_BASE, code))
+        self._mp_net = room_client.RoomTransport(client)
+        self.room_host_waiting_menu = RoomHostWaitingMenu(is_public, self._cancel_room)
+        self.previous_state = self.state
+        self.state = STATE_ROOM_HOSTING
+
+    def _open_room_join(self):
+        self.room_join_menu = RoomJoinMenu(self._join_room, self._close_room_join)
+        self.previous_state = self.state
+        self.state = STATE_ROOM_JOIN
+
+    def _close_room_join(self):
+        self._cancel_room()
+
+    def _cancel_room(self):
+        if self._mp_net is not None:
+            self._mp_net.close()
+        self._mp_net = None
+        self._mp_peer_addr = None
+        self.state = STATE_ROOM_MENU
+
+    def _join_room(self, code, unit_key):
+        if self._mp_net is not None:
+            self._mp_net.close()
+        client = room_client.RoomClient(room_client.ws_url(backend.API_BASE, code))
+        self._mp_net = room_client.RoomTransport(client)
+        self._room_pvo_unit_key = unit_key
+        self._room_join_sent = False
+        self._mp_join_timer = ROOM_JOIN_TIMEOUT
+        self.room_join_menu.status_text = "Connecting..."
+
+    def _poll_room_hosting(self):
+        menu = self.room_host_waiting_menu
+        if not self._room_create_sent:
+            if self._mp_net.error:
+                menu.status_text = f"Connection failed: {self._mp_net.error}"
+                return
+            if not self._mp_net.connected:
+                menu.status_text = "Connecting to the relay..."
+                return
+            display_name = self.account.get("username") or "Match"
+            self._mp_net.send(None, {"type": "create_room", "public": self._room_is_public, "name": display_name})
+            self._room_create_sent = True
+            menu.status_text = "Waiting for room code..."
+            return
+        for _addr, msg in self._mp_net.poll():
+            msg_type = msg.get("type")
+            if msg_type == "room_ready":
+                self._room_code = msg["code"]
+                menu.code_text = self._room_code
+                menu.status_text = "Waiting for a player to join..."
+            elif msg_type == "error":
+                menu.status_text = msg.get("message", "Room error.")
+            elif msg_type == "join":
+                unit_key = msg.get("pvo_unit", pvo.PVO_UNIT_TYPES[0].key)
+                seed = random.randint(0, 2**31 - 1)
+                difficulty = self.settings.get("difficulty", "Normal")
+                self._mp_peer_addr = True  # sentinel: RoomTransport ignores the addr argument
+                self._mp_net.send(
+                    self._mp_peer_addr,
+                    {"type": "start", "seed": seed, "difficulty": difficulty, "drone_key": self._mp_drone_key},
+                )
+                self._start_versus_match(
+                    seed, difficulty, self._mp_drone_key, unit_key, is_host=True, local_role="drone"
+                )
+                return
+
+    def _poll_room_joining(self, dt):
+        if self._mp_net is None:
+            return  # on the JOIN ROOM screen (or timed out/errored already), nothing to poll yet
+        self._mp_join_timer -= dt
+        menu = self.room_join_menu
+        if not self._room_join_sent:
+            if self._mp_net.error:
+                menu.status_text = f"Connection failed: {self._mp_net.error}"
+                return
+            if not self._mp_net.connected:
+                return
+            self._mp_net.send(None, {"type": "join_room"})
+            self._room_join_sent = True
+            return
+        for _addr, msg in self._mp_net.poll():
+            msg_type = msg.get("type")
+            if msg_type == "joined":
+                self._mp_peer_addr = True
+                self._mp_net.send(self._mp_peer_addr, {"type": "join", "pvo_unit": self._room_pvo_unit_key})
+                menu.status_text = "Connected -- waiting for the host to start..."
+            elif msg_type == "error":
+                menu.status_text = msg.get("message", "Room error.")
+                self._mp_net.close()
+                self._mp_net = None
+                return
+            elif msg_type == "start":
+                self._start_versus_match(
+                    msg["seed"], msg["difficulty"], msg["drone_key"], self._room_pvo_unit_key,
+                    is_host=False, local_role="pvo",
+                )
+                return
+        if self._mp_join_timer <= 0.0 and self.room_join_menu is not None:
+            menu.status_text = "No response -- the host may have left."
+            self._mp_net.close()
+            self._mp_net = None
 
     def _start_versus_match(self, seed, difficulty, drone_key, pvo_unit_key, is_host, local_role):
         drone_type = drones.get(drone_key)
@@ -536,6 +715,14 @@ class Game:
             return self.host_waiting_menu
         if self.state == STATE_MP_JOIN:
             return self.join_menu
+        if self.state == STATE_ROOM_MENU:
+            return self.room_menu
+        if self.state == STATE_ROOM_HOST_SELECT:
+            return self.room_host_select_menu
+        if self.state == STATE_ROOM_HOSTING:
+            return self.room_host_waiting_menu
+        if self.state == STATE_ROOM_JOIN:
+            return self.room_join_menu
         if self.state == STATE_SETTINGS:
             return self.settings_menu
         if self.state == STATE_ACCOUNT:
@@ -606,6 +793,14 @@ class Game:
             self._cancel_multiplayer()
         elif self.state == STATE_MP_JOIN:
             self._close_mp_join()
+        elif self.state == STATE_ROOM_MENU:
+            self._close_room_menu()
+        elif self.state == STATE_ROOM_HOST_SELECT:
+            self._close_room_host_select()
+        elif self.state == STATE_ROOM_HOSTING:
+            self._cancel_room()
+        elif self.state == STATE_ROOM_JOIN:
+            self._close_room_join()
         elif self.state == STATE_ACCOUNT:
             self._close_account()
         elif self.state == STATE_LEADERBOARD:
@@ -655,6 +850,20 @@ class Game:
                 menu.update(mouse_pos, dt)
             return
 
+        if self.state == STATE_ROOM_HOSTING:
+            self._poll_room_hosting()
+            menu = self._active_menu()
+            if menu is not None:
+                menu.update(mouse_pos, dt)
+            return
+
+        if self.state == STATE_ROOM_JOIN:
+            self._poll_room_joining(dt)
+            menu = self._active_menu()
+            if menu is not None:
+                menu.update(mouse_pos, dt)
+            return
+
         if self.state == STATE_PLAYING and self.world is not None:
             if self.world.mode == "versus":
                 self._update_versus(dt)
@@ -696,6 +905,8 @@ class Game:
                 return
 
     def _poll_joining(self, dt):
+        if self._mp_net is None:
+            return  # on the JOIN screen, but CONNECT hasn't been pressed yet
         self._mp_join_timer -= dt
         for addr, msg in self._mp_net.poll():
             if msg.get("type") == "start":

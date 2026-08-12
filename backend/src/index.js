@@ -13,6 +13,11 @@ import {
   topByScore,
 } from "./db.js";
 import { levelForXp, rankForLevel, rewardsForScore } from "./levels.js";
+import { RoomRelay, RoomDirectory } from "./room.js";
+
+// Durable Object classes must be exported from the Worker's main module for
+// wrangler.toml's `durable_objects.bindings` to find them.
+export { RoomRelay, RoomDirectory };
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -30,6 +35,8 @@ function json(data, status = 200) {
 function badRequest(message) {
   return json({ error: message }, 400);
 }
+
+const ROOM_CODE_RE = /^[A-Za-z0-9]{4,12}$/;
 
 function unauthorized(message = "Not signed in") {
   return json({ error: message }, 401);
@@ -293,6 +300,26 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // Room relay (Stage 4): a WebSocket upgrade, not JSON, so it can't go
+    // through the generic ROUTES loop below.
+    if (url.pathname.startsWith("/room/")) {
+      const code = url.pathname.slice("/room/".length).toUpperCase();
+      if (!ROOM_CODE_RE.test(code)) return badRequest("Room code must be 4-12 letters/digits.");
+      if (!env.ROOM_RELAY) {
+        return json({ error: "Room server not configured on this deployment yet." }, 501);
+      }
+      const id = env.ROOM_RELAY.idFromName(code);
+      return env.ROOM_RELAY.get(id).fetch(request);
+    }
+    if (request.method === "GET" && url.pathname === "/rooms") {
+      if (!env.ROOM_DIRECTORY) return json({ rooms: [] });
+      const id = env.ROOM_DIRECTORY.idFromName("directory");
+      const response = await env.ROOM_DIRECTORY.get(id).fetch("https://room-directory/list");
+      const data = await response.json();
+      return json(data);
+    }
+
     for (const [method, path, handler] of ROUTES) {
       if (request.method === method && url.pathname === path) {
         if (!env.DB && path !== "/auth/google/device/start") {

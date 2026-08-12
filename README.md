@@ -72,20 +72,14 @@ single-player modes, plus **MULTIPLAYER** for head-to-head play:
 
 Each is a genuinely different way of playing, not a reskin: flying-and-attacking,
 aiming-and-shooting, and reading-the-map-and-reacting, respectively. See
-[`PROJECT_PLAN.md`](PROJECT_PLAN.md) for what's next (a public/private room
-server on top of the multiplayer foundation below).
+[`PROJECT_PLAN.md`](PROJECT_PLAN.md) for what's next.
 
-## Multiplayer (LAN / RadminVPN)
+## Multiplayer
 
 **MULTIPLAYER** from the main menu pits one human Drone Strike pilot against
-one human PVO Defender, head to head, over a local network or a virtual-LAN
-tool like RadminVPN or Hamachi (no special setup needed for either — they
-just make a friend's PC look local, so it's the same "join by address" flow
-either way):
+one human PVO Defender, head to head, either over a local network / virtual
+LAN, or over the internet through a room:
 
-- **Host a match**: pick your drone, then share the address shown (your LAN
-  IP and a port) with whoever you're playing with.
-- **Join a match**: pick your PVO unit, type the host's address, connect.
 - Whoever hosts always flies the drone; whoever joins always mans the PVO
   defense — a fixed, simple pairing rather than a role-picker.
 - The host's machine runs the only real simulation and streams state to the
@@ -94,6 +88,23 @@ either way):
 - Drone wins by destroying every target (or the PVO turret); PVO wins by
   shooting down every one of the drone's airframes. Leaving mid-match counts
   as a forfeit for whoever left.
+
+**LAN / RadminVPN** — no special setup for either: a virtual-LAN tool like
+RadminVPN or Hamachi just makes a friend's PC look local, so it's the same
+"join by address" flow either way.
+- **Host**: pick your drone, then share the address shown (your LAN IP and
+  a port).
+- **Join**: pick your PVO unit, type the host's address, connect.
+
+**Online Room** — play over the internet with a short room code, no network
+setup on either side. Needs the optional backend (see "Accounts, coins,
+levels, leaderboard" below) deployed with its Room relay.
+- **Host a public room**: anyone can find and join it from the live browse
+  list in Join Room.
+- **Host a private room**: share the code with your friend yourself — it
+  never shows up in the public list.
+- **Join a room**: type a code, or click one straight out of the browse
+  list.
 
 ## Airframes
 
@@ -152,11 +163,15 @@ the game creates this file with placeholder values the first time you run
 it. Every backend endpoint was tested against a real local database before
 being written up, not just designed on paper.
 
+The same deployment also serves **Online Room** play (two Durable Objects,
+`RoomRelay` + `RoomDirectory` — see `backend/src/room.js`) — no separate
+setup, it comes with the Worker.
+
 ## Project structure
 
 ```
 main.py               Entry point
-requirements.txt      Just pygame
+requirements.txt      pygame + optional websockets (Online Room play only)
 src/
   game.py              State machine (menu / mode select / settings / account / leaderboard / play / pause / result)
   world.py             Drone Strike: city generation, collisions, mission rules, depth-sorted draw
@@ -164,6 +179,7 @@ src/
   survival_world.py    Civilian Survival: telegraphed strikes, shelters, mission rules
   versus_world.py      Multiplayer: host-authoritative Drone vs. PVO simulation, snapshots
   net.py               LAN/RadminVPN transport: non-blocking UDP + JSON, no dependencies
+  room_client.py       Online Room transport: WebSocket relay client, adapts to net.py's shape
   camera.py            Follow camera, screen shake, world -> screen projection
   drones.py            Airframe definitions (stats + abilities)
   save_system.py       Atomic JSON save/load for profile + account + settings
@@ -189,7 +205,10 @@ src/
     text_input.py        Single-line text field (username/password entry)
     fonts.py             Cached font loader
 buildozer.spec        Android (APK) packaging config for python-for-android
-backend/               Cloudflare Worker + D1: accounts, coins/XP/levels, leaderboard (see backend/README.md)
+backend/               Cloudflare Worker + D1 + Durable Objects: accounts, coins/XP/levels,
+                        leaderboard, Online Room relay (see backend/README.md)
+  src/room.js           RoomRelay + RoomDirectory Durable Objects: WebSocket pairing/relay,
+                        public room browse list
 ```
 
 ## Release channels

@@ -495,30 +495,33 @@ class DefenseSelectMenu(Screen):
 
 
 class MultiplayerMenu(Screen):
-    """Host or join a LAN/RadminVPN match. Picking a role happens on the
-    next screen (host picks an airframe, joiner picks a PVO unit) -- this
-    one is just "which side of the connection are you"."""
+    """Host or join a LAN/RadminVPN match, or use an internet Room instead.
+    Picking a role happens on the next screen (host picks an airframe,
+    joiner picks a PVO unit) -- this one is just "how are the two players
+    reaching each other"."""
 
     title = "MULTIPLAYER"
     dim_background = True
 
-    def __init__(self, on_host, on_join, on_back):
+    def __init__(self, on_host, on_join, on_room, on_back):
         super().__init__()
         cx = constants.WIDTH // 2
         self.widgets = [
-            Button((cx - 140, 260, 280, 56), "HOST A MATCH", on_host, font_size=24),
-            Button((cx - 140, 330, 280, 56), "JOIN A MATCH", on_join, font_size=24),
-            Button((cx - 110, 420, 220, 48), "BACK", on_back, font_size=20),
+            Button((cx - 140, 244, 280, 54), "HOST (LAN/VPN)", on_host, font_size=22),
+            Button((cx - 140, 308, 280, 54), "JOIN (LAN/VPN)", on_join, font_size=22),
+            Button((cx - 140, 372, 280, 54), "ONLINE ROOM", on_room, font_size=22),
+            Button((cx - 110, 460, 220, 48), "BACK", on_back, font_size=20),
         ]
 
     def draw(self, surface):
         super().draw(surface)
         lines = [
-            "Both players need to be reachable on the same network --",
-            "a real LAN, or a virtual one like RadminVPN (free, just",
-            "install it on both machines and use the IP it gives you).",
+            "LAN/VPN: both players reachable on the same network --",
+            "a real LAN, or a virtual one like RadminVPN (free).",
+            "Online Room: play over the internet with a room code,",
+            "no network setup needed on either side.",
         ]
-        y = 200
+        y = 186
         for line in lines:
             surf = get_font(14).render(line, True, constants.TEXT_FAINT)
             surface.blit(surf, surf.get_rect(center=(constants.WIDTH // 2, y)))
@@ -616,6 +619,208 @@ class JoinMultiplayerMenu(Screen):
             color = constants.DANGER if "fail" in self.status_text.lower() or "no" in self.status_text.lower() else constants.TEXT_DIM
             surf = get_font(15).render(self.status_text, True, color)
             surface.blit(surf, surf.get_rect(center=(constants.WIDTH // 2, 460)))
+
+
+class RoomMenu(Screen):
+    """Entry point for internet Room play: host a public room (anyone can
+    find and join it from the browse list), host a private room (share the
+    code yourself), or join one either way."""
+
+    title = "ONLINE ROOM"
+    dim_background = True
+
+    def __init__(self, on_host_public, on_host_private, on_join, on_back):
+        super().__init__()
+        cx = constants.WIDTH // 2
+        self.widgets = [
+            Button((cx - 140, 230, 280, 54), "HOST PUBLIC ROOM", on_host_public, font_size=20),
+            Button((cx - 140, 294, 280, 54), "HOST PRIVATE ROOM", on_host_private, font_size=20),
+            Button((cx - 140, 358, 280, 54), "JOIN ROOM", on_join, font_size=22),
+            Button((cx - 110, 446, 220, 48), "BACK", on_back, font_size=20),
+        ]
+
+    def draw(self, surface):
+        super().draw(surface)
+        if backend.CONFIG_ERROR:
+            self._center_message(surface, backend.CONFIG_ERROR, color=constants.DANGER, y=186)
+        elif not backend.is_configured():
+            self._center_message(
+                surface, "No backend deployed yet -- see backend/README.md.", y=186
+            )
+        else:
+            lines = [
+                "Public rooms show up in everyone's Join Room browser.",
+                "Private rooms need the code shared with your friend directly.",
+            ]
+            y = 178
+            for line in lines:
+                surf = get_font(14).render(line, True, constants.TEXT_FAINT)
+                surface.blit(surf, surf.get_rect(center=(constants.WIDTH // 2, y)))
+                y += 20
+
+    def _center_message(self, surface, text, color=None, y=None):
+        surf = get_font(15).render(text, True, color or constants.TEXT_DIM)
+        surface.blit(surf, surf.get_rect(center=(constants.WIDTH // 2, y or constants.HEIGHT // 2)))
+
+
+class RoomHostWaitingMenu(Screen):
+    """Shown while hosting a Room match: connecting to the relay, then
+    waiting for a second player. `status_text`/`code_text` are mutated
+    externally by Game as the connection progresses (see
+    game.py's _poll_room_hosting)."""
+
+    title = "HOSTING (ONLINE ROOM)"
+    dim_background = True
+
+    def __init__(self, is_public, on_cancel):
+        super().__init__()
+        self.is_public = is_public
+        self.status_text = "Connecting to the relay..."
+        self.code_text = ""
+        self.widgets = [Button((constants.WIDTH // 2 - 110, 420, 220, 48), "CANCEL", on_cancel, font_size=20)]
+
+    def draw(self, surface):
+        super().draw(surface)
+        cx = constants.WIDTH // 2
+        kind = "Public room -- anyone can find it" if self.is_public else "Private room -- share this code"
+        kind_surf = get_font(16).render(kind, True, constants.TEXT_DIM)
+        surface.blit(kind_surf, kind_surf.get_rect(center=(cx, 250)))
+
+        if self.code_text:
+            code_surf = get_font(40, bold=True, mono=True).render(self.code_text, True, constants.ACCENT)
+            surface.blit(code_surf, code_surf.get_rect(center=(cx, 305)))
+
+        status_surf = get_font(16).render(self.status_text, True, constants.TEXT_FAINT)
+        surface.blit(status_surf, status_surf.get_rect(center=(cx, 365)))
+
+
+class RoomJoinMenu(Screen):
+    """Type a room code directly, or pick one from the live public-room
+    browser, then pick a PVO unit and connect. `status_text` is driven
+    externally by Game (connecting / error). The public room list is
+    fetched once on open and can be refreshed."""
+
+    title = "JOIN ROOM"
+    dim_background = True
+
+    def __init__(self, on_connect, on_back):
+        super().__init__()
+        self.on_connect = on_connect
+        self.status_text = ""
+        cx = constants.WIDTH // 2
+        self.code_field = TextInput((cx - 160, 178, 320, 40), placeholder="room code")
+        self.fields = [self.code_field]
+
+        self.selected_key = pvo.PVO_UNIT_TYPES[0].key
+        self.unit_buttons = []
+        bw = 150
+        for i, unit_type in enumerate(pvo.PVO_UNIT_TYPES):
+            rect = (cx - bw - 8 + i * (bw + 16), 232, bw, 40)
+            self.unit_buttons.append(
+                (Button(rect, unit_type.name, self._make_select(unit_type.key), font_size=15), unit_type.key)
+            )
+
+        self.widgets = [btn for btn, _key in self.unit_buttons] + [
+            Button((cx - 140, 288, 280, 48), "CONNECT", self._connect, font_size=22),
+            Button((cx - 110, 348, 220, 44), "REFRESH LIST", self._refresh, font_size=16),
+            Button((cx - 110, 460, 220, 48), "BACK", on_back, font_size=20),
+        ]
+
+        self.public_rooms = None
+        self.rooms_error = None
+        self.rooms_pending = None
+        self._refresh()
+
+    def _make_select(self, key):
+        def select():
+            self.selected_key = key
+
+        return select
+
+    def _connect(self):
+        code = self.code_field.text.strip()
+        if not code:
+            self.status_text = "Enter a room code first (or pick one below)."
+            return
+        self.status_text = "Connecting..."
+        self.on_connect(code, self.selected_key)
+
+    def _refresh(self):
+        if not backend.is_configured():
+            return
+        self.public_rooms = None
+        self.rooms_error = None
+        self.rooms_pending = backend.run_async(backend.list_rooms)
+
+    def _pick_room(self, code):
+        def pick():
+            self.code_field.text = code
+            self._connect()
+
+        return pick
+
+    def update(self, mouse_pos, dt):
+        for field in self.fields:
+            field.update(dt)
+        super().update(mouse_pos, dt)
+        if self.rooms_pending is not None and self.rooms_pending.done:
+            if self.rooms_pending.error:
+                self.rooms_error = self.rooms_pending.error
+            else:
+                self.public_rooms = self.rooms_pending.value.get("rooms", [])
+            self.rooms_pending = None
+
+    def handle_event(self, event, mouse_pos):
+        for field in self.fields:
+            field.handle_event(event, mouse_pos)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for i, room in enumerate(self.public_rooms or []):
+                if self._room_row_rect(i).collidepoint(mouse_pos):
+                    self._pick_room(room["code"])()
+                    return True
+        return super().handle_event(event, mouse_pos)
+
+    def _room_row_rect(self, index):
+        cx = constants.WIDTH // 2
+        return pygame.Rect(cx - 220, 402 + index * 26, 440, 24)
+
+    def draw(self, surface):
+        super().draw(surface)
+        self.code_field.draw(surface)
+        for btn, key in self.unit_buttons:
+            btn.draw(surface)
+            if key == self.selected_key:
+                pygame.draw.rect(surface, constants.ACCENT, btn.rect, width=3, border_radius=10)
+
+        if self.status_text:
+            color = constants.DANGER if "fail" in self.status_text.lower() or "error" in self.status_text.lower() else constants.TEXT_DIM
+            surf = get_font(15).render(self.status_text, True, color)
+            surface.blit(surf, surf.get_rect(center=(constants.WIDTH // 2, 460)))
+
+        cx = constants.WIDTH // 2
+        label = get_font(14, bold=True).render("PUBLIC ROOMS", True, constants.TEXT_FAINT)
+        surface.blit(label, label.get_rect(center=(cx, 386)))
+
+        if not backend.is_configured():
+            self._row_message(surface, "No backend deployed yet.")
+        elif self.rooms_error:
+            self._row_message(surface, self.rooms_error, color=constants.DANGER)
+        elif self.public_rooms is None:
+            self._row_message(surface, "Loading...")
+        elif not self.public_rooms:
+            self._row_message(surface, "No public rooms right now -- host one!")
+        else:
+            font = get_font(15, mono=True)
+            for i, room in enumerate(self.public_rooms[:6]):
+                rect = self._room_row_rect(i)
+                pygame.draw.rect(surface, constants.PANEL_BG, rect, border_radius=6)
+                text = f"{room['code']}  --  {room['name']}"
+                surf = font.render(text, True, constants.TEXT_COLOR)
+                surface.blit(surf, (rect.x + 10, rect.y + 3))
+
+    def _row_message(self, surface, text, color=None):
+        surf = get_font(14).render(text, True, color or constants.TEXT_DIM)
+        surface.blit(surf, surf.get_rect(center=(constants.WIDTH // 2, 402)))
 
 
 class SettingsMenu(Screen):

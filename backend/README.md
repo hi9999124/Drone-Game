@@ -265,6 +265,25 @@ All bodies/responses are JSON. Authenticated endpoints take
 | GET | `/me` | | Current user + profile. |
 | POST | `/score` | `{score, won, targets_destroyed, enemies_destroyed}` | Adds XP/coins, recomputes level, returns `{xp_gained, coins_gained, leveled_up, profile}`. |
 | GET | `/leaderboard?limit=20` | | Top players by total score. |
+| GET | `/rooms` | | Public Online Room matches currently looking for a second player: `{rooms: [{code, name}, ...]}`. |
+| GET (WebSocket upgrade) | `/room/:code` | | Online Room relay. Not JSON-over-HTTP -- see "Online Room play" below. |
+
+## Online Room play
+
+No separate setup: `backend/src/room.js`'s two Durable Objects (`RoomRelay`,
+`RoomDirectory`) are already declared in `wrangler.toml` and deploy along
+with everything else in `npm run deploy` -- nothing to create or configure,
+unlike D1's one-time `wrangler d1 create` step.
+
+`RoomRelay` (one instance per room code) pairs exactly two WebSocket
+connections and forwards every message between them verbatim -- it has no
+idea what a "drone" or "PVO turret" is, it's just relaying whatever
+`src/room_client.py` sends, which is the exact same match protocol
+`src/net.py` already speaks for LAN play. `RoomDirectory` is a single
+persistent instance tracking which room codes are currently public, for the
+`/rooms` browse list; a room that goes public announces itself and
+retracts on disconnect, and anything that goes stale (host crashed without
+a clean close) prunes itself after 5 minutes.
 
 ## Leveling formula
 

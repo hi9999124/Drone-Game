@@ -183,6 +183,13 @@ def fetch_leaderboard(limit=20):
     return _request(f"{API_BASE}/leaderboard?limit={limit}")
 
 
+def list_rooms():
+    """Public Room-play matches currently looking for a second player (see
+    backend/src/room.js's RoomDirectory). Private rooms never appear here --
+    joining one always requires already knowing its code."""
+    return _request(f"{API_BASE}/rooms")
+
+
 class AsyncResult:
     """Polled once per frame by a menu -- lets any blocking call (signup,
     login, fetch_leaderboard) run off the main thread without every caller

@@ -264,14 +264,31 @@ packets over loopback (join/start handshake, streaming state snapshots,
 forfeit-on-leave), and with two real, fully wired `Game` instances completing
 a match end to end -- not just the in-process simulation logic.
 
-**Stage 4 -- Room server (public + private rooms).**
-Only once Stage 3's authority model works. A lobby server (most likely the
-existing Cloudflare Worker extended with WebSockets/Durable Objects, keeping
-the $0-budget constraint) that does presence + room codes + a public server
-browser; private rooms are the same rooms with a password/invite check.
-Under the hood, a room still ultimately brokers the same host/client
-connection Stage 3 already proved -- this stage is about *finding* a match,
-not re-inventing how a match runs.
+**Stage 4 -- Room server (public + private rooms) (done).**
+The existing Cloudflare Worker (`backend/`), extended with two Durable
+Objects (`backend/src/room.js`): `RoomRelay` (one instance per room code,
+pairs exactly two WebSocket peers and forwards every message verbatim --
+deliberately dumb, since the actual match protocol is the exact same
+{"type": "join"/"start"/"input"/"state"/"leave", ...} messages Stage 3
+already speaks over UDP) and `RoomDirectory` (a single persistent instance
+tracking which room codes are currently public, for the browse list; stale
+entries -- e.g. a host that crashed without a clean disconnect -- prune
+themselves after 5 minutes). `src/room_client.py` adapts a WebSocket
+connection to the exact same (addr, message) send()/poll() shape
+`net.UDPTransport` uses, so none of Stage 3's host/join/update/result logic
+in `game.py` needed to change -- only *getting* two players onto that shared
+transport differs (connect to the relay, then create_room-or-join_room, vs.
+a direct UDP packet). Needs the optional `websockets` package (guarded
+import, LAN play still needs nothing beyond it); private rooms never appear
+in the directory, so joining one always requires already knowing the code.
+Verified against a real `wrangler dev` relay: public room announce/list/
+prune, private rooms staying hidden, join-nonexistent and room-full error
+paths, and two full `Game` instances completing a match both by typed code
+and by clicking a room out of the live public browser. This work also
+surfaced and fixed a latent crash in Stage 3's LAN join screen (polling a
+transport that didn't exist yet if a frame rendered before CONNECT was
+pressed) -- caught by testing the Room join screen the same way and ported
+back.
 
 Building 3 and 4 before 1 and 2 exist would mean networking two factions
 that don't have gameplay yet, and rewriting the connection model once rooms
