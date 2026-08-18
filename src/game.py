@@ -9,6 +9,7 @@ from . import backend, constants, drones, leveling, net, room_client, save_syste
 from .camera import Camera
 from .defense_world import DefenseWorld
 from .entities import pvo
+from .sandbox_world import SandboxWorld
 from .survival_world import SurvivalWorld
 from .ui.hud import HUD
 from .ui.menu import (
@@ -35,6 +36,7 @@ from .versus_world import VersusWorld
 STATE_MENU = "menu"
 STATE_MODE_SELECT = "mode_select"
 STATE_DRONE_SELECT = "drone_select"
+STATE_SANDBOX_SELECT = "sandbox_select"
 STATE_DEFENSE_SELECT = "defense_select"
 STATE_MP_MENU = "mp_menu"
 STATE_MP_HOST_SELECT = "mp_host_select"
@@ -89,7 +91,7 @@ class Game:
 
         self.camera = Camera()
         self.hud = HUD()
-        self.touch = TouchControls()
+        self.touch = TouchControls(scheme=self.settings.get("touch_scheme", "Stick"))
         self.world = None
         self.state = STATE_MENU
         self.previous_state = STATE_MENU
@@ -129,6 +131,7 @@ class Game:
         )
         self.mode_select_menu = ModeSelectMenu(
             self._open_drone_select,
+            self._open_sandbox_select,
             self._open_defense_select,
             self._start_survival_mission,
             self._open_multiplayer_menu,
@@ -153,6 +156,7 @@ class Game:
             self.settings, self._close_settings, self._on_settings_changed, show_fullscreen_option=not IS_ANDROID
         )
         self.drone_menu = None
+        self.sandbox_menu = None
         self.defense_menu = None
         self.mp_host_select_menu = None
         self.host_waiting_menu = None
@@ -197,6 +201,22 @@ class Game:
         # or (only reachable via a stale/legacy path) the main menu directly.
         self.state = self.previous_state if self.previous_state in (STATE_PAUSED, STATE_MODE_SELECT) else STATE_MENU
 
+    def _open_sandbox_select(self):
+        # Free Flight uses the same airframe picker as a strike mission --
+        # which drone you're flying is the one loadout decision the sandbox
+        # still has, and unlocks apply the same way.
+        self.sandbox_menu = DroneSelectMenu(
+            self.profile,
+            self._start_sandbox_session,
+            self._close_sandbox_select,
+            selected_key=self.profile.get("last_drone"),
+        )
+        self.previous_state = self.state
+        self.state = STATE_SANDBOX_SELECT
+
+    def _close_sandbox_select(self):
+        self.state = self.previous_state if self.previous_state in (STATE_PAUSED, STATE_MODE_SELECT) else STATE_MENU
+
     def _open_defense_select(self):
         self.defense_menu = DefenseSelectMenu(self._start_defense_mission, self._close_defense_select)
         self.previous_state = self.state
@@ -214,6 +234,8 @@ class Game:
         mode = self.world.mode if self.world is not None else "strike"
         if mode == "defense":
             self._open_defense_select()
+        elif mode == "sandbox":
+            self._open_sandbox_select()
         elif mode in ("survival", "versus"):
             # Survival has no loadout to change; Versus is a live 2-player
             # match, so there's nothing to swap mid-match either -- both
@@ -474,6 +496,11 @@ class Game:
 
     def _on_settings_changed(self, key=None):
         self.camera.enable_shake = self.settings.get("screen_shake", True)
+        if key == "touch_scheme":
+            # Rebuilds the layout for the new scheme immediately, so the
+            # change is visible behind the settings screen rather than on the
+            # next launch.
+            self.touch.set_scheme(self.settings.get("touch_scheme", "Stick"))
         if key == "fullscreen" and not IS_ANDROID:
             self._apply_display_mode()
             self._reflow_for_resolution()
@@ -604,6 +631,27 @@ class Game:
         self.touch.release_all()
         self.state = STATE_PLAYING
 
+    def _start_sandbox_session(self, drone_key):
+        drone_type = drones.get(drone_key)
+        self.profile["last_drone"] = drone_key
+        self._autosave()
+
+        self.world = SandboxWorld(drone_type, self.settings.get("difficulty", "Normal"))
+        # Tailored to the airframe, because "how do I actually break something"
+        # has a different answer per attack type -- and a ram drone cruising at
+        # its spawn altitude of 110 flies straight over every 55-80m block
+        # without touching it, which reads as "nothing works" if unexplained.
+        if drone_type.attack == "ram":
+            hint = "Free flight -- dive into anything below your altitude to level it"
+        else:
+            hint = "Free flight -- level anything. Ordnance reloads itself"
+        self.world.notify(hint, duration=5.0)
+        self.camera.enable_shake = self.settings.get("screen_shake", True)
+        self.camera.snap_to(self.world.player.pos)
+        self._tracked_player = self.world.player
+        self.touch.release_all()
+        self.state = STATE_PLAYING
+
     def _start_defense_mission(self, unit_key):
         self.world = DefenseWorld(unit_key, self.settings.get("difficulty", "Normal"))
         self.world.notify("Defend the marked structures from incoming raiders", duration=5.0)
@@ -629,6 +677,8 @@ class Game:
             self._start_defense_mission(self.world.player.type.key)
         elif self.world.mode == "survival":
             self._start_survival_mission()
+        elif self.world.mode == "sandbox":
+            self._start_sandbox_session(self.profile.get("last_drone", "fpv"))
         else:
             self._start_mission(self.profile.get("last_drone", "fpv"))
 
@@ -648,6 +698,18 @@ class Game:
     def _return_to_menu(self):
         if self.world is not None and self.world.mode == "versus":
             self._teardown_multiplayer(notify_peer=True)
+        if (
+            self.world is not None
+            and self.world.mode == "sandbox"
+            and self.world.result == world_module.RESULT_PLAYING
+        ):
+            # A sandbox run has no end condition of its own, so walking away
+            # from it IS the end of it: mark it finished and show the same
+            # summary screen every other mode gets. RESULT_WON is just "the
+            # run concluded" here -- there was nothing to lose.
+            self.world.result = world_module.RESULT_WON
+            self._finish_mission()
+            return
         self.world = None
         self.state = STATE_MENU
 
@@ -705,6 +767,8 @@ class Game:
             return self.mode_select_menu
         if self.state == STATE_DRONE_SELECT:
             return self.drone_menu
+        if self.state == STATE_SANDBOX_SELECT:
+            return self.sandbox_menu
         if self.state == STATE_DEFENSE_SELECT:
             return self.defense_menu
         if self.state == STATE_MP_MENU:
@@ -758,13 +822,21 @@ class Game:
                 self._reflow_for_resolution()
                 continue
 
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            # K_AC_BACK is what SDL delivers for an Android device's back
+            # gesture/button; it means the same thing as ESC does here.
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_AC_BACK):
                 self._handle_escape()
                 continue
 
             if self.state == STATE_PLAYING:
                 if self.show_touch:
                     self.touch.handle_event(event)
+                    if self.touch.state.get("pause"):
+                        # The on-screen pause button -- the only way off a
+                        # touchscreen into the pause menu. _handle_escape
+                        # releases every held control, which also clears this
+                        # button, so it can't re-trigger on the next frame.
+                        self._handle_escape()
                 continue
 
             menu = self._active_menu()
@@ -783,6 +855,8 @@ class Game:
             self._close_mode_select()
         elif self.state == STATE_DRONE_SELECT:
             self._close_drone_select()
+        elif self.state == STATE_SANDBOX_SELECT:
+            self._close_sandbox_select()
         elif self.state == STATE_DEFENSE_SELECT:
             self._close_defense_select()
         elif self.state == STATE_MP_MENU:
@@ -811,7 +885,17 @@ class Game:
     def _gather_controls(self):
         keys = pygame.key.get_pressed()
         touch = self.touch.state if self.show_touch else {}
+        # Analog stick, only when it's actually deflected: a centred (or
+        # absent) stick has to stay out of the dict entirely so the keyboard
+        # keeps full control of the same frame.
+        stick = touch.get("stick")
+        if stick is not None and (stick[0] or stick[1]):
+            stick_value = stick
+        else:
+            stick_value = None
         return {
+            "stick": stick_value,
+            "look": touch.get("look", (0.0, 0.0)),
             "thrust": keys[pygame.K_w] or keys[pygame.K_UP] or touch.get("thrust", False),
             # S / Down arrow: reverse thrust and brake. This is the axis that
             # was missing entirely before.
@@ -827,7 +911,12 @@ class Game:
             ),
             "fire": (
                 keys[pygame.K_f]
-                or pygame.mouse.get_pressed()[0]
+                # Only when the on-screen controls are hidden: SDL synthesizes
+                # mouse events from touches, so on a phone "any button held"
+                # reads as "left mouse held" -- which would mean steering the
+                # joystick continuously dropped bombs. With the pads visible,
+                # the FIRE button is the way to fire.
+                or (not self.show_touch and pygame.mouse.get_pressed()[0])
                 or touch.get("fire", False)
             ),
         }
@@ -879,6 +968,9 @@ class Game:
                     self.camera.snap_to(player.pos)
                     self._tracked_player = player
                 self.camera.follow(player.pos, dt)
+            # The camera pad pans the view away from the drone while held and
+            # springs back when released (see Camera.set_look).
+            self.camera.set_look(self.touch.state.get("look") if self.show_touch else None)
             self.camera.update(dt)
 
             if self.world.result != world_module.RESULT_PLAYING:
@@ -950,6 +1042,9 @@ class Game:
         mode = world.mode
         if mode == "versus":
             self._finish_versus_match()
+            return
+        if mode == "sandbox":
+            self._finish_sandbox_session()
             return
         won = world.result == world_module.RESULT_WON
 
@@ -1028,6 +1123,33 @@ class Game:
             change_loadout = self._open_drone_select
 
         self.result_menu = ResultMenu(won, summary, self._retry, change_loadout, self._return_to_menu)
+        self.state = STATE_RESULT
+
+    def _finish_sandbox_session(self):
+        """Free Flight is practice, not a career mission.
+
+        It deliberately awards no coins, XP or career score and never touches
+        the leaderboard: the city is defenceless and the run is unbounded, so
+        any reward it paid out would be farmable by simply flying for longer,
+        which would make every ranked number next to it meaningless. The
+        summary is the reward.
+        """
+        world = self.world
+        summary = [
+            ("SESSION SCORE", world.score),
+            ("BLOCKS LEVELLED", f"{world.blocks_destroyed}/{world.block_total}"),
+            ("CITY DESTROYED", f"{world.destruction_fraction * 100:.0f}%"),
+            ("PROPS DESTROYED", f"{world.props_destroyed}/{world.prop_total}"),
+            ("AIRFRAMES LOST", world.airframes_lost),
+            ("CAREER REWARDS", "NONE (SANDBOX)"),
+        ]
+        self.result_menu = ResultMenu(
+            True,
+            summary,
+            lambda: self._start_sandbox_session(self.profile.get("last_drone", "fpv")),
+            self._open_sandbox_select,
+            self._return_to_menu,
+        )
         self.state = STATE_RESULT
 
     def _finish_versus_match(self):

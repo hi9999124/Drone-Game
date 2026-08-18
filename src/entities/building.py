@@ -30,6 +30,10 @@ class Building:
         self.max_hp = 260.0 if (is_target or is_protected) else 0.0
         self.hp = self.max_hp
         self.destroyed = False
+        # See hit_by_footprint below -- set by make_destructible(), since a
+        # mode where every block is a valid thing to shoot at needs the same
+        # altitude-agnostic hit rule mission targets already have.
+        self._footprint_hits = False
         self._windows = self._generate_windows()
 
     @property
@@ -55,8 +59,34 @@ class Building:
             return False
         return altitude < self.height and self.rect.collidepoint(x, y)
 
+    @property
+    def hit_by_footprint(self):
+        """True if a shot counts as a hit on this block by footprint alone.
+
+        Mission targets (and Free Flight's whole city) work this way because a
+        rocket fired from the cruising altitude the game itself recommends --
+        above every roofline -- would otherwise fly straight over everything
+        and detonate nowhere. Plain scenery and Air Defense's protected
+        structures keep the strict altitude test.
+        """
+        return self.is_target or self._footprint_hits
+
+    def make_destructible(self, hp):
+        """Turn an ordinary block into something that can be levelled.
+
+        Free Flight uses this on the whole city: outside of it, only mission
+        targets and the structures the Air Defense player is protecting have
+        any HP at all, and everything else is scenery.
+        """
+        self.max_hp = float(hp)
+        self.hp = float(hp)
+        self._footprint_hits = True
+
     def take_damage(self, amount):
-        if not (self.is_target or self.is_protected) or self.destroyed:
+        # Gated on having HP rather than on the target/protected flags, so a
+        # mode can make any block destructible via make_destructible() without
+        # having to mislabel it as a mission target.
+        if self.max_hp <= 0.0 or self.destroyed:
             return False
         self.hp -= amount
         if self.hp <= 0:

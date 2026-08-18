@@ -167,6 +167,7 @@ class World:
             controls.get("right", False),
             controls.get("ascend", False),
             controls.get("descend", False),
+            stick=controls.get("stick"),
         )
         player.update(dt)
 
@@ -344,7 +345,10 @@ class World:
 
         if friendly:
             for building in self.buildings:
-                if not building.is_target or building.destroyed:
+                # Anything with HP is fair game: in a strike mission that's
+                # only the mission targets, but Free Flight makes the whole
+                # city destructible through the same path.
+                if building.destroyed or building.max_hp <= 0.0:
                     continue
                 # Distance to the footprint, not just its centre, so clipping a
                 # corner of a long block still counts.
@@ -354,9 +358,7 @@ class World:
                 if dist <= radius:
                     falloff = 1.0 - (dist / radius) * 0.6
                     if building.take_damage(damage * falloff):
-                        self.targets_destroyed += 1
-                        self.score += SCORE_TARGET
-                        self.notify("Target destroyed")
+                        self._on_building_destroyed(building)
 
         for enemy in self.enemies:
             if not enemy.alive:
@@ -387,6 +389,14 @@ class World:
             if not friendly and dist <= radius and abs(player.altitude - altitude) <= radius:
                 if player.take_damage(damage):
                     self._consume_unit("Shot down")
+
+    def _on_building_destroyed(self, building):
+        """Hook for what a levelled block is worth. Subclasses override it --
+        Free Flight scores every block, not just the marked ones."""
+        if building.is_target:
+            self.targets_destroyed += 1
+            self.score += SCORE_TARGET
+            self.notify("Target destroyed")
 
     def _check_mission_state(self, dt):
         if self.targets_remaining == 0:

@@ -147,7 +147,12 @@ class DefenseWorld:
         player = self.player
         if player is None or not player.alive_and_well:
             return
-        player.set_input(controls.get("left", False), controls.get("right", False), controls.get("fire", False))
+        player.set_input(
+            controls.get("left", False),
+            controls.get("right", False),
+            controls.get("fire", False),
+            stick=controls.get("stick"),
+        )
         player.update(dt)
         shot = player.try_fire()
         if shot:
