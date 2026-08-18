@@ -1,5 +1,6 @@
 import pygame
 
+from ..utils import clamp
 from .base import draw_shadow
 
 TURN_SPEED = 130.0  # degrees/second -- deliberately slower than a drone's,
@@ -35,8 +36,17 @@ class PlayerTurret:
     def alive_and_well(self):
         return self.alive and self.hp > 0
 
-    def set_input(self, left, right, fire):
+    STICK_DEAD_ZONE = 0.18
+
+    def set_input(self, left, right, fire, stick=None):
         self.turn_input = (1.0 if right else 0.0) - (1.0 if left else 0.0)
+        if stick is not None:
+            # A turret has one axis (barrel bearing), so only the stick's
+            # horizontal deflection matters -- pushed right, it traverses
+            # right, proportionally to how far.
+            vector = pygame.Vector2(float(stick[0]), float(stick[1]))
+            if vector.length() >= self.STICK_DEAD_ZONE:
+                self.turn_input = clamp(vector.x, -1.0, 1.0)
         self._fire_requested = fire
 
     def update(self, dt):

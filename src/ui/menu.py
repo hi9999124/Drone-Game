@@ -7,6 +7,7 @@ from ..utils import clamp
 from .button import Button, OptionRow
 from .fonts import get_font
 from .text_input import TextInput
+from .touch_controls import SCHEMES as TOUCH_SCHEMES
 
 
 def _overlay():
@@ -139,6 +140,7 @@ class MainMenu(Screen):
 
 _MODE_DESCRIPTIONS = {
     "DRONE STRIKE": ["Fly a drone and destroy", "the city's marked targets."],
+    "FREE FLIGHT": ["Sandbox. The whole city is", "destructible, nothing shoots", "back, unlimited airframes."],
     "AIR DEFENSE": ["Man a PVO turret and defend", "civilian structures from", "incoming raiders."],
     "CIVILIAN SURVIVAL": ["No weapon -- reach shelter", "before a telegraphed strike", "lands. Survive the bombardment."],
     "MULTIPLAYER": ["Drone vs. PVO, head to head", "over LAN or RadminVPN --", "one attacks, one defends."],
@@ -146,25 +148,32 @@ _MODE_DESCRIPTIONS = {
 
 
 class ModeSelectMenu(Screen):
-    """Pick a side: attack (Drone Strike, the original single-player
-    mission), defend (Air Defense, manning a PVO turret against incoming
-    raiders), survive (Civilian Survival, on foot with no weapon), or
-    Multiplayer -- a human Drone against a human PVO player, head to head."""
+    """Pick a mode: fly free (Free Flight, the no-rules destruction sandbox),
+    attack (Drone Strike, the original single-player mission), defend (Air
+    Defense, manning a PVO turret against incoming raiders), survive (Civilian
+    Survival, on foot with no weapon), or Multiplayer -- a human Drone against
+    a human PVO player, head to head."""
 
-    title = "CHOOSE YOUR SIDE"
+    title = "CHOOSE A MODE"
     dim_background = True
 
-    def __init__(self, on_drone_mode, on_defense_mode, on_survival_mode, on_multiplayer, on_back):
+    def __init__(self, on_drone_mode, on_sandbox_mode, on_defense_mode, on_survival_mode, on_multiplayer, on_back):
         super().__init__()
         cx = constants.WIDTH // 2
-        card_w, card_h = 210, 200
+        card_h = 200
         gap = 20
         entries = [
-            ("DRONE STRIKE", on_drone_mode, constants.ACCENT),
+            ("FREE FLIGHT", on_sandbox_mode, constants.ACCENT),
+            ("DRONE STRIKE", on_drone_mode, (255, 120, 130)),
             ("AIR DEFENSE", on_defense_mode, constants.GOOD),
             ("CIVILIAN SURVIVAL", on_survival_mode, constants.WARN),
             ("MULTIPLAYER", on_multiplayer, constants.DANGER),
         ]
+        # Cards shrink to fit rather than running off the edge -- five of them
+        # at a fixed 210 wide overflows anything narrower than ~1170px, which
+        # includes plenty of phones held in landscape.
+        available = constants.WIDTH - 60 - gap * (len(entries) - 1)
+        card_w = max(150, min(210, available // len(entries)))
         total_w = len(entries) * card_w + (len(entries) - 1) * gap
         start_x = cx - total_w // 2
         self.cards = [
@@ -190,11 +199,14 @@ class ModeSelectMenu(Screen):
             pygame.draw.rect(surface, bg, rect, border_radius=12)
             pygame.draw.rect(surface, color, rect, width=2, border_radius=12)
 
-            title = get_font(20, bold=True).render(label, True, color)
-            title_rect = title.get_rect(center=(rect.centerx, rect.y + 40))
-            if title_rect.width > rect.width - 16:
-                title = get_font(16, bold=True).render(label, True, color)
+            # Step the title down through sizes until it fits the card --
+            # cards can now be as narrow as 150px (see __init__), where even
+            # the fallback size overflows for a label like CIVILIAN SURVIVAL.
+            for size in (20, 16, 13, 11):
+                title = get_font(size, bold=True).render(label, True, color)
                 title_rect = title.get_rect(center=(rect.centerx, rect.y + 40))
+                if title_rect.width <= rect.width - 16:
+                    break
             surface.blit(title, title_rect)
 
             y = rect.y + 82
@@ -233,6 +245,24 @@ class HowToMenu(Screen):
                 ],
             ),
             (
+                constants.ACCENT,
+                [
+                    "ON A PHONE -- hold anywhere on the left half to raise the",
+                    "joystick: the drone flies where you push it, and how hard.",
+                    "Drag the right half to look ahead; +/- set altitude, FIRE",
+                    "attacks. Switch back to the old button pads in Settings.",
+                ],
+            ),
+            (
+                constants.GOOD,
+                [
+                    "FREE FLIGHT is the sandbox: every block in the city can be",
+                    "levelled, fuel tanks chain off each other, nothing shoots",
+                    "back, and airframes and ordnance are unlimited. No timer,",
+                    "no fail state -- leave via pause when you're done.",
+                ],
+            ),
+            (
                 None,
                 [
                     "Destroy every marked target (red roof, crosshair) before",
@@ -258,12 +288,23 @@ class HowToMenu(Screen):
                 ],
             ),
         ]
+        # The page has grown past a 720p screen's worth of lines, so the row
+        # height (and with it the font) shrinks to fit whatever height the
+        # display actually has instead of running off the bottom edge.
+        total_lines = sum(len(lines) for _, lines in sections)
+        section_gap = 14
+        available = constants.HEIGHT - y - 80
+        line_h = clamp(
+            (available - section_gap * (len(sections) - 1)) / max(1, total_lines), 13.0, 24.0
+        )
+        font_size = int(clamp(line_h - 6, 10.0, 16.0))
+
         for color, lines in sections:
             for line in lines:
-                surf = get_font(16, mono=True).render(line, True, color or constants.TEXT_COLOR)
-                surface.blit(surf, surf.get_rect(center=(cx, y)))
-                y += 24
-            y += 16
+                surf = get_font(font_size, mono=True).render(line, True, color or constants.TEXT_COLOR)
+                surface.blit(surf, surf.get_rect(center=(cx, int(y))))
+                y += line_h
+            y += section_gap
 
 
 class DroneSelectMenu(Screen):
@@ -837,6 +878,7 @@ class SettingsMenu(Screen):
             ("Show FPS", ["Off", "On"], "show_fps"),
             ("Screen shake", ["Off", "On"], "screen_shake"),
             ("Touch controls", ["Auto", "On", "Off"], "touch_controls"),
+            ("Touch layout", TOUCH_SCHEMES, "touch_scheme"),
         ]
         if show_fullscreen_option:
             # Not offered on Android: the app is already fullscreen at the

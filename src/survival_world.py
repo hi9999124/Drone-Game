@@ -113,6 +113,7 @@ class SurvivalWorld:
             controls.get("reverse", False),
             controls.get("left", False),
             controls.get("right", False),
+            stick=controls.get("stick"),
         )
         player.update(dt)
 

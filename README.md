@@ -29,6 +29,13 @@ pip install -r requirements.txt
 python main.py
 ```
 
+**Checks** (headless, no display needed — they drive the real game loop):
+
+```
+python tests/smoke_sandbox.py   # Free Flight rules, props, joystick, camera pan
+python tests/smoke_game.py      # menu -> mode select -> play -> pause -> result
+```
+
 ## Controls
 
 | Key | Action |
@@ -46,9 +53,23 @@ python main.py
 Flight is arcade-style: thrust pushes in the direction you're facing (like
 *Asteroids*), with a separate altitude axis on top.
 
-On a touchscreen the same controls appear as on-screen pads — turn/thrust on
-the left, altitude and FIRE on the right. They're mouse-clickable on desktop
-too, and multi-touch aware, so you can hold thrust, turn and climb at once.
+### On a phone
+
+The default touch layout is **one thumb-stick plus a camera pad** — the whole
+scheme is designed to be flown with a single thumb:
+
+| Control | Where | What it does |
+|---|---|---|
+| Flight stick | Hold anywhere on the left half | The drone banks toward wherever you push and throttles up by how far — push, don't tap. The stick appears under your thumb rather than at a fixed spot |
+| Camera | Drag anywhere on the right half | Pans the view off the drone to scout ahead; springs back when you let go |
+| `+` / `-` | Right side, inboard of FIRE | Climb / descend |
+| FIRE | Bottom right | Airframe ability (bomb, rocket, boost) |
+| `II` | Top centre | Pause — a phone has no ESC key |
+
+Prefer discrete buttons? **Settings — Touch layout — Pads** restores the original
+six-button cross (turn/thrust left, altitude and FIRE right). Both layouts are
+multi-touch aware and both work with a mouse on desktop, which is how they're
+tested.
 
 ## The 2.5D world
 
@@ -61,18 +82,40 @@ airframe.
 
 ## Game modes
 
-**PLAY** from the main menu leads to a side-select screen with three
+**PLAY** from the main menu leads to a mode-select screen with four
 single-player modes, plus **MULTIPLAYER** for head-to-head play:
 
 | Mode | You play | Objective |
 |---|---|---|
-| Drone Strike | A drone (see Airframes below) | Destroy every marked target while interceptors and PVO air defense hunt you |
+| Free Flight | A drone (see Airframes below) | None — the whole city is destructible, nothing shoots back, fly and level it |
+| Drone Strike | A drone | Destroy every marked target while interceptors and PVO air defense hunt you |
 | Air Defense | A PVO turret (flak gun or SAM site) | Shoot down waves of attacking drones before they destroy protected structures |
 | Civilian Survival | A civilian on foot, unarmed | Reach shelter before each telegraphed strike lands; survive the bombardment |
 
-Each is a genuinely different way of playing, not a reskin: flying-and-attacking,
-aiming-and-shooting, and reading-the-map-and-reacting, respectively. See
-[`PROJECT_PLAN.md`](PROJECT_PLAN.md) for what's next.
+Each is a genuinely different way of playing, not a reskin: pure destruction,
+flying-and-attacking, aiming-and-shooting, and reading-the-map-and-reacting,
+respectively. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for what's next.
+
+## Free Flight (destruction sandbox)
+
+The mode to start with, and the one built for a phone. Pick an airframe and
+fly — there are no targets, no timer, no enemies and no way to fail:
+
+- **Every block in the city has HP** and can be levelled, not just five marked
+  ones. Taller blocks are tougher, so flattening a 200 m tower is several bomb
+  runs' work.
+- **The streets are stocked with things that explode**: fuel depots on empty
+  lots, tankers, parked cars, comms masts. Fuel tanks chain off each other, so
+  one good hit on a depot takes the whole yard — and anything standing next
+  to it — with it.
+- **Unlimited airframes and self-reloading ordnance.** Crash and you respawn in
+  about a second; run the rack dry and rounds trickle back one at a time.
+- **The HUD tracks how much of the city you have flattened** (blocks levelled,
+  props destroyed, % of the city gone).
+- **It is practice, not career progress**: Free Flight deliberately pays no
+  coins, XP or career score and never touches the leaderboard, since the run is
+  unbounded and the city is defenceless. Pause — MAIN MENU ends the run and
+  shows the session summary.
 
 ## Multiplayer
 
@@ -175,6 +218,7 @@ requirements.txt      pygame + optional websockets (Online Room play only)
 src/
   game.py              State machine (menu / mode select / settings / account / leaderboard / play / pause / result)
   world.py             Drone Strike: city generation, collisions, mission rules, depth-sorted draw
+  sandbox_world.py     Free Flight: fully destructible city, explosive props, no win/lose rules
   defense_world.py     Air Defense: waves of raiders, protected structures, mission rules
   survival_world.py    Civilian Survival: telegraphed strikes, shelters, mission rules
   versus_world.py      Multiplayer: host-authoritative Drone vs. PVO simulation, snapshots
@@ -197,11 +241,12 @@ src/
     player_turret.py    Air Defense: player-controlled turret (aim + fire)
     raider.py           Air Defense: attacking-drone AI
     civilian.py         Civilian Survival: player character (on-foot movement)
+    prop.py             Free Flight: street props (fuel tanks, cars, masts) and their blasts
   ui/
     button.py           Hover-animated button + settings option row
     menu.py             Main / drone select / settings / account / leaderboard / multiplayer / pause / result screens
     hud.py               Flight, ability and mission panels, off-screen target arrows
-    touch_controls.py   Responsive on-screen pads (touch + mouse)
+    touch_controls.py   Touch layouts: floating joystick + camera pad, or the button pads
     text_input.py        Single-line text field (username/password entry)
     fonts.py             Cached font loader
 buildozer.spec        Android (APK) packaging config for python-for-android

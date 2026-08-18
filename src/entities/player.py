@@ -1,6 +1,7 @@
 import pygame
 
 from .. import constants
+from ..utils import clamp
 from .base import Aircraft, draw_shadow
 
 
@@ -19,12 +20,46 @@ class PlayerDrone(Aircraft):
     def alive_and_well(self):
         return self.alive and self.hp > 0
 
-    def set_input(self, thrust, reverse, left, right, ascend, descend):
+    # A stick pushed less than this far reads as "centred" -- a thumb resting
+    # on the pad shouldn't creep the drone forward.
+    STICK_DEAD_ZONE = 0.18
+    # How far off-heading (degrees) the stick has to point before the turn
+    # input saturates. Small enough that a flick of the thumb is a hard bank,
+    # large enough that tiny corrections don't wobble.
+    STICK_TURN_BAND = 42.0
+
+    def set_input(self, thrust, reverse, left, right, ascend, descend, stick=None):
         # A single axis built from two buttons: pressing both cancels out, which
         # is what makes S/Down a real brake rather than a no-op.
         self.thrust_input = (1.0 if thrust else 0.0) - (1.0 if reverse else 0.0)
         self.turn_input = (1.0 if right else 0.0) - (1.0 if left else 0.0)
         self.climb_input = (1.0 if ascend else 0.0) - (1.0 if descend else 0.0)
+        if stick is not None:
+            self._apply_stick(stick)
+
+    def _apply_stick(self, stick):
+        """Point-the-drone-where-you-push analog steering.
+
+        The touch joystick gives a screen-space direction, not a turn rate:
+        the drone banks toward wherever the thumb is pushing and throttles up
+        by how far it's pushed. That's the only control model that works with
+        one thumb -- holding "turn left" and "thrust" as separate buttons is
+        exactly what the second thumb used to be for. Falls through to the
+        button values untouched when the stick is centred, so keyboard and
+        touch can coexist in the same frame.
+        """
+        vector = pygame.Vector2(float(stick[0]), float(stick[1]))
+        magnitude = min(vector.length(), 1.0)
+        if magnitude < self.STICK_DEAD_ZONE:
+            return
+
+        desired = vector.as_polar()[1]  # degrees, same convention as self.angle
+        # Signed shortest angle to the requested heading, in -180..180.
+        error = (desired - self.angle + 180.0) % 360.0 - 180.0
+        self.turn_input = clamp(error / self.STICK_TURN_BAND, -1.0, 1.0)
+        # Ease off the throttle while hauling the nose around, so a hard
+        # reversal pivots on the spot instead of carving a huge arc.
+        self.thrust_input = magnitude * (1.0 if abs(error) < 60.0 else 0.4)
 
     def update(self, dt):
         self.cooldown = max(0.0, self.cooldown - dt)

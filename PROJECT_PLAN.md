@@ -69,6 +69,26 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
       impact) land across the city; reach a marked shelter
       (`Building.is_shelter`) before the timer runs out or take damage.
       Mission rules in `src/survival_world.py`.
+- [x] **Free Flight (destruction sandbox)** — `src/sandbox_world.py`. The
+      first entry on the mode-select screen and the one the phone build is
+      shaped around: the entire city is destructible (`Building.make_destructible`
+      gives every block HP scaled by its height), the streets are stocked with
+      explosive props (`src/entities/prop.py` — fuel depots, tankers, cars,
+      comms masts, with fuel chaining up to 3 links deep), nothing hostile
+      spawns, airframes are unlimited and ordnance trickles back on a timer.
+      No win, no loss, no timer: leaving via pause ends the run and shows a
+      session summary. Deliberately pays **no** coins/XP/career score and
+      never submits to the leaderboard — the run is unbounded and the city is
+      defenceless, so any reward would be farmable and would devalue every
+      ranked number next to it.
+- [x] **One-thumb touch controls** — a floating analog joystick (left half of
+      the screen; the drone banks toward wherever you push and throttles by
+      how far — `PlayerDrone._apply_stick`) plus a camera pad (right half;
+      pans the view off the drone and springs back — `Camera.set_look`),
+      altitude/FIRE buttons, and an on-screen pause button, since a phone has
+      no ESC key. The old six-button pads are still there under Settings →
+      Touch layout. The stick feeds Air Defense's turret and Survival's
+      civilian too, not just the drone.
 - [ ] Audio (engine loop, explosions) — no sound at all right now
 
 ## Fixed bugs (worth knowing if you touch this code again)
@@ -91,6 +111,22 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
   scripted "fly straight at a shorter-than-spawn-altitude target and confirm
   it's destroyed" test, not just read through.
 
+## Checks
+
+There's no test framework in the project (and no CI job running one yet), but
+two headless scripts drive the real game loop end to end and are the thing to
+run before pushing gameplay changes:
+
+```
+python tests/smoke_sandbox.py   # Free Flight rules, props/chaining, stick steering, camera pan,
+                                # plus "every other mode still behaves" regressions
+python tests/smoke_game.py      # the real Game state machine: menu -> mode select -> play ->
+                                # pause -> result, at desktop and phone resolutions
+```
+
+Both run under SDL's dummy video driver, so they work over SSH/CI with no
+display, and both exit non-zero on the first failed check.
+
 ## Architecture
 
 - `main.py` — entry point, creates and runs `Game`
@@ -99,6 +135,10 @@ Distribution stays $0: source + `requirements.txt` on GitHub, run via
   behaviour doesn't change with frame rate
 - `src/world.py` — owns the city, everything flying in it, collision resolution
   and the win/lose rules
+- `src/sandbox_world.py` — Free Flight: subclasses `World` and replaces exactly
+  the mission rules a sandbox doesn't have (no hostiles, no targets, no
+  win/lose, free respawns, self-reloading ordnance), plus prop damage and the
+  fuel-chain reaction
 - `src/camera.py` — follow camera, screen shake, and the world→screen
   projection that creates the 2.5D look
 - `src/entities/` — `base.Aircraft` (shared flight integration + shadows),

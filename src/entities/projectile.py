@@ -114,7 +114,7 @@ class Projectile:
             # target forever and detonates nowhere, since blocks_at() is
             # altitude-gated and nothing about a flat, fast rocket ever
             # brings it back down into that range on its own.
-            if building.is_target and building.contains_point(self.pos.x, self.pos.y):
+            if building.hit_by_footprint and building.contains_point(self.pos.x, self.pos.y):
                 self.alive = False
                 return self._detonation()
             if building.blocks_at(self.pos.x, self.pos.y, self.altitude):

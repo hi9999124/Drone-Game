@@ -28,8 +28,17 @@ class Civilian:
     def alive_and_well(self):
         return self.alive and self.hp > 0
 
-    def set_input(self, up, down, left, right):
+    STICK_DEAD_ZONE = 0.18
+
+    def set_input(self, up, down, left, right, stick=None):
         move = pygame.Vector2((1.0 if right else 0.0) - (1.0 if left else 0.0), (1.0 if down else 0.0) - (1.0 if up else 0.0))
+        if stick is not None:
+            # The touch joystick already gives a screen-space direction, which
+            # for a top-down runner is exactly the move direction -- no
+            # heading to turn toward, unlike the drone.
+            vector = pygame.Vector2(float(stick[0]), float(stick[1]))
+            if vector.length() >= self.STICK_DEAD_ZONE:
+                move = vector
         if move.length_squared() > 1e-6:
             move = move.normalize()
             self.facing = move

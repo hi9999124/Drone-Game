@@ -9,6 +9,8 @@ class HUD:
     def draw(self, surface, world, camera, show_fps=False, fps=0.0):
         if world.mode == "defense":
             self._draw_defense_hud(surface, world, camera)
+        elif world.mode == "sandbox":
+            self._draw_sandbox_hud(surface, world, camera)
         elif world.mode == "survival":
             self._draw_survival_hud(surface, world, camera)
         else:
@@ -34,6 +36,13 @@ class HUD:
             self._draw_turret_panel(surface, player)
         self._draw_defense_mission_panel(surface, world)
         self._draw_raider_compass(surface, world, camera)
+
+    def _draw_sandbox_hud(self, surface, world, camera):
+        player = world.player
+        if player is not None and player.alive:
+            self._draw_flight_panel(surface, player)
+            self._draw_ability(surface, player, unlimited=True)
+        self._draw_sandbox_panel(surface, world)
 
     def _draw_survival_hud(self, surface, world, camera):
         player = world.player
@@ -83,13 +92,17 @@ class HUD:
         text = get_font(11, mono=True).render(label, True, constants.TEXT_FAINT)
         surface.blit(text, (rect.x, rect.y + 10))
 
-    def _draw_ability(self, surface, player):
+    def _draw_ability(self, surface, player, unlimited=False):
         rect = pygame.Rect(18, constants.HEIGHT - 92, 250, 74)
         self._panel(surface, rect)
 
         ready = player.cooldown <= 0.0
         has_ammo = player.type.attack == "ram" or player.ammo > 0
-        if not has_ammo:
+        if not has_ammo and unlimited:
+            # Free Flight trickles rounds back rather than ending the run --
+            # "rearming" is the honest word for it, "NO ORDNANCE" isn't.
+            status, color = "REARMING", constants.WARN
+        elif not has_ammo:
             status, color = "NO ORDNANCE", constants.DANGER
         elif ready:
             status, color = "READY", constants.GOOD
@@ -102,7 +115,7 @@ class HUD:
         surface.blit(status_surf, (rect.right - status_surf.get_width() - 14, rect.y + 12))
 
         if player.type.attack == "ram":
-            detail = f"AIRFRAMES {player.type.units}"
+            detail = "AIRFRAMES  UNLIMITED" if unlimited else f"AIRFRAMES {player.type.units}"
         else:
             detail = f"ORDNANCE {player.ammo}"
         detail_surf = get_font(13, mono=True).render(detail, True, constants.TEXT_DIM)
@@ -323,6 +336,41 @@ class HUD:
             f"strikes survived {world.strikes_survived}", True, constants.TEXT_FAINT
         )
         surface.blit(survived, (rect.x + 14, rect.y + 78))
+
+    def _draw_sandbox_panel(self, surface, world):
+        # 152 tall, not 138: _bar draws its label *below* the bar, so the two
+        # readouts under it need a full row of clearance each or they collide.
+        rect = pygame.Rect(constants.WIDTH - 268, 18, 250, 152)
+        self._panel(surface, rect)
+
+        title = get_font(15, bold=True).render("FREE FLIGHT", True, constants.TEXT_DIM)
+        surface.blit(title, (rect.x + 14, rect.y + 10))
+
+        score = get_font(17, bold=True, mono=True).render(f"SCORE   {world.score:6d}", True, constants.ACCENT)
+        surface.blit(score, (rect.x + 14, rect.y + 32))
+
+        blocks = get_font(15, bold=True, mono=True).render(
+            f"BLOCKS  {world.blocks_destroyed}/{world.block_total}", True, constants.WARN
+        )
+        surface.blit(blocks, (rect.x + 14, rect.y + 56))
+
+        self._bar(
+            surface,
+            pygame.Rect(rect.x + 14, rect.y + 80, rect.width - 28, 8),
+            world.destruction_fraction,
+            constants.DANGER,
+            "CITY LEVELLED",
+        )
+
+        detail = get_font(13, mono=True).render(
+            f"props {world.props_destroyed}/{world.prop_total}", True, constants.TEXT_FAINT
+        )
+        surface.blit(detail, (rect.x + 14, rect.y + 108))
+
+        lost = get_font(13, mono=True).render(
+            f"airframes lost {world.airframes_lost}", True, constants.TEXT_FAINT
+        )
+        surface.blit(lost, (rect.x + 14, rect.y + 128))
 
     def _draw_message(self, surface, message):
         text = get_font(26, bold=True).render(message, True, constants.WARN)

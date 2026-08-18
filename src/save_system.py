@@ -29,6 +29,10 @@ DEFAULT_DATA = {
         "show_fps": False,
         "screen_shake": True,
         "touch_controls": "Auto",  # Auto / On / Off
+        # Stick = one floating analog joystick + a camera pad (the phone
+        # layout the game is designed around); Pads = the original six
+        # discrete buttons.
+        "touch_scheme": "Stick",
         "fullscreen": False,
     },
 }
